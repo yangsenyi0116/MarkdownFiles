@@ -1,0 +1,1 @@
+https://kubernetes.io/zh/docs/tasks/manage-gpus/scheduling-gpus/
