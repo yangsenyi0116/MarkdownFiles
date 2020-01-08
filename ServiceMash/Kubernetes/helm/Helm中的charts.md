@@ -812,4 +812,4 @@ No issues found
 - 用户将期望修改此类Chart的内容，因此文档应说明用户如何进行修改。
 - 所有出现的``都将替换为指定的Chart名称，以便可以将入门Chart用作模板。
 
-当前，添加Chart的唯一方法`$XDG_DATA_HOME/helm/starters`是在其中手动复制Chart。在Chart的文档中，您可能需要解释该过程。
+当前，添加Chart的唯一方法`$XDG_DATA_HOME/helm/starters`是在其中手动复制Chart。在Chart的文档中，您可能需要解释该过程.
