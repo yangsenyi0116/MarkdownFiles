@@ -1,0 +1,30 @@
+- KNN临近算法
+
+- 数据归一化
+
+- Scaler
+
+- 简单线性回归
+
+- 多元线性回归
+
+- 梯度下降法
+
+- 主成分分析Principal Component Analysis
+
+  - 主要作用是降维
+
+  > ![1567598842319](G:\onedriver\OneDrive\MarkDown\image\1567598842319.png)
+  >
+  > ![1567599127152](G:\onedriver\OneDrive\MarkDown\image\1567599127152.png)
+  >
+  > ![1567599248747](G:\onedriver\OneDrive\MarkDown\image\1567599248747.png)
+  >
+  > ![1567599340704](G:\onedriver\OneDrive\MarkDown\image\1567599340704.png)
+  >
+  > ![1567600286986](G:\onedriver\OneDrive\MarkDown\image\1567600286986.png)
+  >
+  > 
+  >
+  > ![1567651279069](G:\onedriver\OneDrive\MarkDown\image\1567651279069.png)
+

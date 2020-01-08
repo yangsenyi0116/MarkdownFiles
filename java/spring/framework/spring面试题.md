@@ -1,0 +1,75 @@
+
+SpringLOGO
+Spring是什么,谈谈你对Spring的理解。这是初级开发人员必然被问道的问题,如果你不懂Spring你就无法从事这一行业,此处仅限技术人员,公司的继承人等其他个例不受此限制。那么Spring是什么呢,Spring遵循分层的结构思想什么什么实现了高内聚低耦合巴拉巴拉一大堆,咬文嚼字不是我的强项,直接开干，让你们看看Spring到底是什么东西。
+
+
+
+通过maven下载好Spring的jar包
+
+
+我们在src下/main/resources下创建配置文件applicationContext.xml 并为其配置xsd约束
+
+
+
+把上面这一对约束复制到applicationContext.xml 中然后ctrls+s保存，Spring框架到目前为止已经搭建完毕。配置文件中的根标签是beans,所以配置一定要写到beans里面。到目前为止Sping框架就搭建完毕了。创建下面一个pojo看看spring都有哪些功能
+
+
+
+
+
+
+Sping有一个功能就是帮我们创建pojo对象实例,下面我么需要在applicationContext.xml中将pojo配置为bean,注册到spring容器中。
+
+
+bean的name可以随便取,一会我们会用到,class就是pojo的完整类名。下面请看java代码
+
+
+
+我们通过ClassPathXmlApplicationContext类传入applicationContext.xml配置文件的相对路径，创建出spring的容器对象ApplicationContext,在通过容器对象中的方法获取到Spring容器为我们创建的user对象,其实Spring两个容器,除了ApplicationContext外还有一个BeanFactory ，那么他们有什么区别呢？BeanFactory :是在getBean的时候才会生成类的实例. applicationContext :在加载applicationContext.xml(容器启动)时候就会创建. BeanFactory 是一种懒加载的方式，那么当访问的bean过多的时候服务器压力就变大了,所以beanFactory实际上是一种淘汰了的容器,而applicationContext更类似于一种缓存机制,所以它受众更高，下面看一下打印结果
+
+可以看到User的toString方法已经打出,补充一下以上代码我并没有运行在java的main线程里面,而是使用的junit单元测试。我们在main方法外部随意创建一个public的方法,在上部使用@Test注解即可运行,这样能够帮我们节省在main方法内通过对象调用方法的时间。
+
+以上的就是Spring被外行广为流传的,传说中的IOC的使用,什么是IOC中文意思就是控制反转,什么意思？我们平时创建对象需要自己手动创建,现在对象都是通过spring容器ApplicationContext创建,这就是所谓的IOC控制反转,如果有了解工厂设计模式的朋友会更容易理解,ApplicationContext此处就相当于一个工厂类。我之前讲解MyBatis框架的SqlSession就是由SqlSesionFactory创建的。
+
+接下来我们看一下spring另一个特性,DI依赖注入是什么。上面Java代码中的username,userage都是由我手动设置的,但是这样实在太过于麻烦,于是Spring提供了为对象属性注入的功能。下面回到刚才xml中的userBean部分
+
+
+创建property字标签,name为pojo中需要注入的变量名,value就是需要注入的值,
+
+
+结果显示已经注入成功了。那么spring是否能够完成我们自定义java对象的注入呢？
+
+
+
+新建一个pojo类User2并在User中作为变量引入,
+
+
+xml中新增一个bean user2，将User2对象交给spring创建,在User的Bean配置user2的引用,property的name还是变量名,这里的value要换成ref,ref为要引用的对象的bean的name,下面我们看执行结果
+
+
+它的原理是spring读到xml中的值调用pojo内部的set方法完成注入的m所以这种方式必须要有set方法。除此之外我们还可以通过构造方法在创建对象的时候为属性赋值,在xml中使用<constructor-arg></constructor-arg>标签来实现,也很简单照葫芦画瓢参照上面的配就行。
+
+
+注意构造函数有几个参数这里就要传入几个参数,如果你只创建了一个三个参数的构造方法,那你传2个参数就报错,没传参也报错,所以必须创建所有参数的构造方法才能让程序稳定运行,这种注入方式让人很有负担。除了构造外,spring还支持p名称空间注入和spel表达式注入,spel基于set方法和构造方法注入的,所以我们通过图中的注入方式足矣,也是主流的注入方式。p和spel注入在这里就不演示了,以上就是spring的DI依赖注入了，下面我们看看如给集合对象注入,
+
+
+还是先创建一个pojo，然后我们在xml中为集合注入值
+
+
+
+
+如图所示,如果没有指定泛型,那么可以用value传值,也可以用ref传对象,可以不指定集合元素的类型,还是比较简单,下面看看输出结果
+
+
+IOC需要DI的支持为什么呢？因为没有DI的注入Spring创造出的对象都是空值是无法使用的,所以说IOC和DI多数是同时出现人们眼前的。 下面补充一下Bean元素的属性
+
+
+scope是范围的意思,在绝地求生中scope意为瞄准镜,如果你的队友是个老外你就和他说 i want this 4times scope他就明白了。在bean中scope表示bean对象的作用域,有两个选项singlton,和prototype。什么意思呢,singlton时spring只会创建单例对象,就是你反复从容器中取到堆中的同一对象,而prototype则会创建多个对象。
+
+
+那么bean的生命周期是什么呢,我认为通常生命周期这四个字只出现在web层面,所以这里应该是配置controller的,看它的两个属性nit-method="init" 和destroy-method="destory",init是初始化的意思,里面写的是pojo的方法名,该方法一定是public的,而destory是销毁方法,同init一样用法,那么他们分别是什么时候执行的呢？如果使用applicationContext容易,那么项目启动时就会执行init方法,销毁方法想要执行，需要是单例创建的Bean而且在工厂关闭的时候，Bean才会被销毁. 什么时候工厂开启关闭呢？web项目中随着中间件tommcat启动,那么bean的init就会被执行,关闭tommcat时 destory方法就会执行。
+
+最后给大家看一道java面试题,问图下输出结果
+
+
+有的人一看,main方法里是空的,怎么输出啊？原来啊,在我们执行main方法之前,Jvm的classLoader需要将这个类加载到内存,首先加载的就是被static修饰的变量，也就是全局变量。这里先声明一个List 集合,然后在堆中创建一个ArrayList的子类对象,大家看这个对象的创建方法是不是与我们平时创建对象的方式是不是不太一样呢？这个叫做匿名内部类,匿名内部类被创建时会执行它的方法,因为它的匿名内部类,所以和我们平时通过对象调用方法不太一样,这里没有显示调用它的对象名,但是方法还是被执行了。先对集合添加一个子串,然后打印集合中的内容，那么打印出来的是什么呢？结果是null,为什么呢？因为在内部类的方法执行完成之前,还没有结束对象的创建,所以声明NAMES的引用并没有与堆中任一对象进行连接,此处打印的相当于List<String> NAMES;只完成了前半段语句,所以打印出来的是空的,如果等内部类中方法都结束时,在main中重新打印NAMES的内容才可以看到集合中的元素。这道题主要考察的是Java实例化一个对象在堆栈中的过程
