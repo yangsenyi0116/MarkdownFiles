@@ -50,3 +50,23 @@ jupyterhub
 ```
 sudo jupyterhub
 ```
+
+
+
+## 启动JupyterHub与docker
+
+可以使用以下命令启动JupyterHub docker映像：
+
+```
+docker run -d -p 8000:8000 --name jupyterhub jupyterhub/jupyterhub jupyterhub
+```
+
+此命令将创建一个名为容器`jupyterhub`，你可以 **停止和恢复**使用。`docker stop/start`
+
+集线器服务将监听端口8000上的所有接口，这使其成为**在台式机或笔记本电脑上测试JupyterHub**的不错选择。
+
+如果要在具有公共IP的计算机上运行docker，则应（如在MUST中一样）通过在docker配置中添加ssl选项或使用启用了ssl的代理来使用ssl **保护它**。
+
+[挂载卷](https://docs.docker.com/engine/admin/volumes/volumes/) 将使您能够将数据存储在docker映像（主机系统）之外，因此即使您启动新映像也将保持持久性。
+
+该命令将在您的docker容器中生成一个根shell。您可以使用root shell **在容器中创建系统用户**。这些帐户将在JupyterHub的默认配置中用于身份验证。`docker exec -it jupyterhub bash`
