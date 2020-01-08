@@ -39,5 +39,6 @@ minikube启动脚本
 ```bash
 minikube start --image-mirror-country cn \
     --iso-url=https://kubernetes.oss-cn-hangzhou.aliyuncs.com/minikube/iso/minikube-v1.6.0.iso \
-    --registry-mirror=https://xxxxxx.mirror.aliyuncs.com
+    --registry-mirror=https://xxxxxx.mirror.aliyuncs.com \
+    --vm-driver=none
 ```
