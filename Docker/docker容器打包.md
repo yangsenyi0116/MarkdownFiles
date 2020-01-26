@@ -8,3 +8,4 @@ OPTIONS说明：
 -c :使用Dockerfile指令来创建镜像；
 -m :提交时的说明文字；
 -p :在commit时，将容器暂停。
+
