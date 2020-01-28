@@ -542,6 +542,44 @@ spec:
 
 ![1580203025950](../../../../images/1580203025950.png)
 
+###### Deployment更新策略
+
+**Deployment可以保证在升级时只有一定数量的Pod是Down的。默认的，他会确保至少有比期望的Pod数量少一个是up状态（最多一个不可用）**
+
+**Deployment同时也可以确保只创建出超过期望数量的一定数量的Pod。默认的，它会确保最多比期望的Pod数量多一个的Pod是up的（最多一个surge）**
+
+**未来的Kubernetes版本中，将从1-1变成25%-25%**
+
+```bash
+kubectl describe deployments
+```
+
+###### Rollover(若阁rollout并行)
+
+**假如创建了一个有5个nginx:1.7.9replica的Deployment，但是当还只有3个nginx:1.7.9的replica创建出来的时候就开始更新含有5个的nginx:1.9.1replica的Deployment。在这种情况下，Deployment会立即杀掉已创建的3个nginx:1.7.9的Pod。并开始创建nginx：1.9.1的Pod，它不会等到所有的5个nginx:1.7.9的Pod都创建完成后才开始改变航道**
+
+###### 回退Deployment
+
+>只要Deployment的rollout被触发就会创建一个revision。也就是说当且仅当Deployment的Pod template本更改，例如更新template中的label和容器镜像时，就会创建出一个新的revision。其他的更新，比如扩容Deployment不会创建revision--因此我们可以很方便的手动或自动扩容。这意味着当回退到历史revision时，只有Deployment中的Pod template部分才会回退
+
+```bash
+kubectl set image deployment/nginx-deployment nginx=nginx:1.9.1
+kubectl rollout status deployment nginx-deployment
+## 查看当前的更新状况
+kubectl get pods
+kubectl rollout history deployment/nginx-deployment
+## 查看历史版本
+kubectl rollout undo deployment/nginx-deployment
+kubectl rollout undo deployment/nginx-deployment --to-revision=2
+##可以使用revision参数指定某个历史版本
+kubectl rollout pause deployment/nginx-deployment
+## 暂停 deployment的更新
+```
+
+###### 清理Policy
+
+**可以通过设置.spec.revisionHistoryLimit项来指定deployment最多保留多少revision历史记录；如果将该项设置为0，Deployment就不允许回退了**
+
 ##### DaemonSet
 
 DaemonSet确保全部（或者一些）Node上运行一个Pod的副本。当有Node加入集群时，也会为阀门新增一个Pod。当有Node从集群移除时，这些Pod也会被回收，删除DaemonSet将会删除它创建的所有Pod
@@ -552,9 +590,60 @@ DaemonSet确保全部（或者一些）Node上运行一个Pod的副本。当有N
 - 在每个Node上运行日志收集daemon，例如fluentd、logstash
 - 在每个Node上运行监控daemon，例如Prometheus Node Exporter、collected、Datadog代理、NewRelic代理，或Ganglia gmond
 
+```yaml
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: daemonset-example
+  lables:
+    app: daemonset
+spec:
+  selector:
+    matchLabels:
+      name: daemonset-example
+  template:
+    metadata:
+      labels:
+        name: daemonset-example
+    spec:
+      containers:
+      - name: daemonset-example
+        image:wangyanglinux/myapp:v1
+```
+
+
+
 ##### Job
 
 > Job负责批处理任务，即仅执行一个的任务，它保证批处理任务的一个或多个Pod成功结束
+
+特殊说明
+
+- spec.template格式同Pod
+- RestartPolicy仅支持Never或OnFailure
+- 单个Pod时，默认Pod成功允许后Job即结束
+- .spec.completions标志Job结束需要成功运行Pod个数，默认为1
+- .spec.parallelism标志并运行的Pod的个数，默认为1
+- sepc.activeDeadlineSeconds标志失败Pod的重试最大时间，超过这个时间不会继续重试
+
+```yaml
+apiVesion: batch/v1
+kind: Job
+metadata:
+  name: pi
+spec: 
+  template:
+    metadata:
+      name: pi
+    spec:
+      containers:
+      - name: pi
+        image: perl
+        command: ["perl", "-Mbignum-bpi", "-wle", "print bpi(2000)"]
+      restartPolicy: Never
+```
+
+<!--查看日志，可以显示出答应的2000位 π值-->
 
 ##### CronJob 
 
