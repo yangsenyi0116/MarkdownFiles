@@ -460,6 +460,88 @@ Deployment为Pod和RS提供了一个声明式定义（declarative）方法，用
 - 扩容和缩容
 - 暂停和继续Deployment
 
+**1. 部署一个简单的Nginx应用**
+
+```yaml
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+spec:
+  replicas: 3
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.7.9
+        ports:
+        - containerPort: 80
+```
+
+```bash
+kubectl create -f https://kubertes.io/docs/user-guid/nginx-deployment.yaml --record ##--record参数可以记录命令，我们可以很方便的查看每次revision的变化
+```
+
+**2. 扩容**
+
+```bash
+kubectl scale deployment nginx-deployment --replicas 10
+```
+
+**3. 如果集群支持horizontal pod autoscaling的话，还可以为Deployment设置自动扩展**
+
+```bash
+kubectl autoscale deployment nginx-deployment --min=10 --max=15 --cpu-percent=80
+```
+
+**4. 更新镜像也比较简单**
+
+```bash
+kubectl set image deployment/nginx-deployment nginx=ngingx:1.9.1
+```
+
+**5. 回滚**
+
+```yaml
+kubectl rollout undo deployment/nginx-deployment
+```
+
+
+
+###### RS与RC与Deployment关联
+
+RC主要的作用就是用来确保容器应用的副本数始终保持在用户定义的副本数，即如果由容器异常退出，会自动创建新的Pod来替代；如果异常多出来的容器也会自动回收
+
+**Kubernetes官方建议使用RS替代RC进行部署**
+
+```yaml
+apiVersion: extensions/v1beta1
+kind: ReplicaSet
+metadata:
+  name: frontend
+spec:
+  replicas: 3
+  selector:
+    matchLables:
+      tier: frontend
+    spec:
+      containers:
+      - name: php-redis
+        image: gcr.io/gogle_samples/gb-frontend:v3
+        env:
+        - name:GET_HOSTS_FROM
+          value: dns
+        ports:
+        - containerPort: 80
+```
+
+###### RS与Deployment的关联
+
+![1580203025950](../../../../images/1580203025950.png)
+
 ##### DaemonSet
 
 DaemonSet确保全部（或者一些）Node上运行一个Pod的副本。当有Node加入集群时，也会为阀门新增一个Pod。当有Node从集群移除时，这些Pod也会被回收，删除DaemonSet将会删除它创建的所有Pod
@@ -498,9 +580,14 @@ StatefulSet是为了解决有状态服务的问题（对应Deployment和ReplicaS
 
 - 稳定的持久化存储，即Pod重新调度后还是能访问到相同的持久化数据，基于PVC来实现
 - 稳定的网络标志，即Pod重新调度后其PodName和HostName不变，基于Headless Service（即没有Cluster IP的Service）来实现
-- 有序部署，有序扩展，即Pod是有顺序的，在部署或者扩展的时候要依据定义的顺序依次进行（即从0到N-1，在下一个Pod运行之前所有之前的Pod必须是Running和Ready状态），基于init containers来实现有序收缩，有序删除（即从N-1到0）
+- 有序部署，有序扩展，即Pod是有顺序的，在部署或者扩展的时候要依据定义的顺序依次进行（即从0到N-1，在下一个Pod运行之前所有之前的Pod必须是Running和Ready状态），基于init containers来实现
+- 有序收缩，有序删除（即从N-1到0）
 
 ##### Horizontal Pod AutoScaling
+
+> 应用的资源使用率通常都有高峰和低谷的时候，如何削峰填谷，提高集群的整体资源利用率，让service中的Pod个数自动调整呢？这就有赖于Horizontal Pod AutoScaling了，顾名思义，使Pod水平自动缩放
+
+
 
 ## 服务发现
 
