@@ -441,19 +441,64 @@ spec:
 
 #### 什么是控制器
 
+Kubernetes中内建了很多controller（控制器），这些相当于一个状态机，用来控制Pod的具体状态和行为
+
 #### 控制器类型说明
 
 ##### ReplicationController和ReplicaSet
 
+RC用来确保容器应用的副本数使用保持在用户定义的副本数，即如果有空气异常退出，会自动创建新的Pod来替代；而如果异常多出来的容器也会自动回收
+
+在新版本的kubernetes中建议使用RS来取代RC。RS跟RC没有本质的不同，只是名字不一样，而且RS支持集合式的selector；
+
 ##### Deployment
+
+Deployment为Pod和RS提供了一个声明式定义（declarative）方法，用来替代以前的RC来方便的管理应用。典型的应用场景包括：
+
+- 定义Deployment来创建Pod和RS
+- 滚动升级和回滚应用
+- 扩容和缩容
+- 暂停和继续Deployment
 
 ##### DaemonSet
 
+DaemonSet确保全部（或者一些）Node上运行一个Pod的副本。当有Node加入集群时，也会为阀门新增一个Pod。当有Node从集群移除时，这些Pod也会被回收，删除DaemonSet将会删除它创建的所有Pod
+
+使用DaemonSet的一些典型用法：
+
+- 运行集群存储daemon，例如在Node上运行glusterd、ceph
+- 在每个Node上运行日志收集daemon，例如fluentd、logstash
+- 在每个Node上运行监控daemon，例如Prometheus Node Exporter、collected、Datadog代理、NewRelic代理，或Ganglia gmond
+
 ##### Job
 
-##### CronJob
+> Job负责批处理任务，即仅执行一个的任务，它保证批处理任务的一个或多个Pod成功结束
+
+##### CronJob 
+
+> 在特定的时间循环创建Job
+
+CronJob管理基于时间的Job，即
+
+- 在给定时间点只运行一次
+- 周期性地在给定时间点运行
+
+适用前提条件：**当前使用的Kubernetes集群，版本>=1.8(对CronJob)。对弈先前版本的集群，版本<1.8,启动API Server时，通过传递选项--runtime-config=batch/v2alpha1-true可以开启batch/v2alpha1API**
+
+典型的用法如下所示：
+
+- 在给定的时间点调度Job运行
+- 创建周期性运行的Job，例如：数据库备份、发送邮件
 
 ##### StatefulSet
+
+StatefulSet作为Controller为Pod提供的唯一表示。它可以保证部署和Scale的顺序
+
+StatefulSet是为了解决有状态服务的问题（对应Deployment和ReplicaSets是为无状态服务而设），其应用场景包括
+
+- 稳定的持久化存储，即Pod重新调度后还是能访问到相同的持久化数据，基于PVC来实现
+- 稳定的网络标志，即Pod重新调度后其PodName和HostName不变，基于Headless Service（即没有Cluster IP的Service）来实现
+- 有序部署，有序扩展，即Pod是有顺序的，在部署或者扩展的时候要依据定义的顺序依次进行（即从0到N-1，在下一个Pod运行之前所有之前的Pod必须是Running和Ready状态），基于init containers来实现有序收缩，有序删除（即从N-1到0）
 
 ##### Horizontal Pod AutoScaling
 
