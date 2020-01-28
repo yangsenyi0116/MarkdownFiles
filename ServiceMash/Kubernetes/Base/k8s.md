@@ -213,19 +213,227 @@ spec.containers[]下边的值
 
 ### Pod的生命周期
 
+![1580196592153](../../../../images/1580196592153.png)
+
+
+
+#### Pause
+
 #### initC
+
+初始化容器
+
+在初始化容器之后就会自动销毁
+
+如果initC没有执行成功 MainC并不会执行
+
+![1580197043885](../../../../images/1580197043885.png)
+
+![1580197278598](../../../../images/1580197278598.png)
+
+![1580197951554](../../../../images/1580197951554.png)
+
+![1580198425120](../../../../images/1580198425120.png)
+
+##### init容器
+
+```yaml
+apiVersion:v1
+kind: Pod
+metadata:
+	name: myapp-pod
+	labels:
+		app: myapp
+	spec: 
+		containers:
+		- name: myapp-container
+		  image:busybox
+		  command: ['sh', '-c', 'echo The app is running! && sleep 3600']
+		initContainers:
+		- name: init-myservice
+		  image: busybox
+		  command: ['sh', '-c', 'until nslookup myservice; do echo waiting for myservice; sleep 2; done;']
+		- name: init-mydb
+		  image: busybox
+		  command: ['sh', '-c', 'until nslookup mydb; do echo waiting for mydb; sleep 2; done;']
+```
+
+```yaml
+kind: Service 
+apiVersion: v1
+metadata:
+	name: myservice
+spec:
+	ports:
+	  - protocol: TCP
+	    port: 80
+	    targetPort: 9376
+---
+kind: Service
+apiVersion: v1
+metadata:
+	name: mydb
+spec:
+	ports:
+	  - protocol: TCP
+	    port: 80
+	    targetPort: 9377
+```
+
+
 
 #### Pod phase
 
+可能存在的值
+
+- 挂起（Pending): Pod已被Kubernetes系统结构，但有一个或者多个容器镜像尚未被创建。等待时间包括调度Pod的时间和通过网络下载镜像的时间，这可能需要花点时间
+- 运行中（Running）：该Pod已经绑定到了一个节点上，Pod中所有的容器都已经被创建。至少有一个容器正在运行，过着正处于启动或重启状态
+- 成功（Success）：Pod中所有容器都被成功终止，并且不会再重启
+- 失败（Failed）： Pod中所有的容器都已终止了，并且不会再重启
+- 未知（Unknown）：应为某些原因无法取得Pod的状态，通常是因为与Pod所在主机通信失败
+
 #### 容器探针
+
+> 探针是由kubelet对容器执行的定期诊断。要执行诊断,kubelet调用由容器实现的Handler
+
+有三种类型的处理程序
+
+- ExecAction: 在容器内执行指定命令。如果命令退出时返回码为，则认为诊断成功
+- TCPSocketAction:对指定端口上的容器的IP地址进行TCP检查。如果端口打开，则诊断被认定是成功的
+- HTTPGetAction：对指定的端口和路径上的容器的IP地址执行HTTP Get请求，若果响应的状态码大于等于200且小于400，则诊断被认定是成功的
+
+每次探测都将获得一下三种结果之一
+
+- 成功： 容器通过了诊断
+- 失败： 容器未通过诊断
+- 未知： 诊断失败，因此不会采取任何行动
 
 ##### livenessProbe
 
+就绪检测
+
+只是容器是否正在运行。如果存活探测失败，则kubelet会杀死容器，并且容器将受到其重启策略的影响。如果容器不提供存活探针，则默认状态为Success
+
+###### livenessProbe-exec
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: liveness-exec-pod
+  namespace: default
+spec:
+  containers:
+  - name: liveness-exec-container
+    image: hub.atguigu.com/library/busybox
+    imagePullPolicy: IfNotPresent
+    command: ["/bin/sh","-c","touch /tmp/live ; sleep 60; rm -rf /tmp/live; sleep 3600"]
+    livenessProbe:
+      exec:
+        command: ["test", "-e", "/tmp/live"]
+      initialDelaySeconds: 1
+      periodSeconds: 3
+```
+
+###### livenessProbe-httpget
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata: 
+  name: liveness-httpget-pod
+  namespace: default
+spec:
+  containers:
+  - name: readiness-httpget-container
+    image: hub.atguigu.com/library/myapp:v1
+    imagePullPolicy: ifNotPresentports
+    ports:
+    - name: http
+      containerPort: 80
+    livenessProbe:
+      httpGet:
+        port: http
+        path: /index.html
+      initialDelaySeconds: 1
+      periodSeconds: 3
+      timeoutSeconds: 10
+```
+
+###### livenessProbe-tcp
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: probe-tcp
+spec:
+  containers:
+  - name: nginx
+  image: hub.atguigu.com/library/myapp:v1
+  livenessProbe:
+    initialDelaySeconds: 5
+    timeoutSeconds: 1
+    tcpSocket:
+      port: 80
+```
+
+
+
 ##### readinesssProbe
+
+就绪检测
+
+只是容器是否准备好服务请求。如果就绪探测失败，端点控制器将从与Pod匹配的所有Service的端点中删除该Pod的IP地址。初始延迟之前的就绪状态默认为Failure。如果容器不提供就绪探针，则默认状态为Success
+
+###### readinessPrebe-httpget
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata: 
+  name: rediness-httpget-pod
+  namespace: default
+spec:
+  containers:
+  - name: readiness-httpget-container
+    image: *****:v1
+    imagePullPolicy: ifNotPresentports
+    readinessProbe:
+      httpGet:
+        port: http
+        path: /index1.html
+      initialDelaySeconds: 1
+      periodSeconds: 3
+```
+
+
 
 #### Pod hook
 
 #### 重启策略
+
+#### 启动、退出动作
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: lifecycle-demo
+spec:
+  containers:
+  - name: lifecycle-demo-container
+    image: nginx
+    lifecycle:
+      postStart:
+        exec:
+          command: ["/bin/sh", "-c", "echo Hello from the postStart handler > /usr/share/message"]
+        preStop:
+          exec:
+            command: ["/usr/sbin/nginx", "-s", "quit"]
+```
+
+
 
 ## Pod控制器
 
