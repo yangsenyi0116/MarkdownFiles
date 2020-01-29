@@ -645,6 +645,15 @@ spec:
 
 <!--查看日志，可以显示出答应的2000位 π值-->
 
+##### CronJob Spec
+
+- **`spec.template`**格式同Job
+- RestartPolict仅支持Never或OnFailure
+- 单个Pod时，默认Pod成功运行后Job即结束
+- **`.spec.completions`**标志Job结束需要成功运行的Pod个数，默认为1
+- **`.spec.parallelism`**标志并运行的Pod的格式，默认为1
+- **`spec.activeDeadlineSeconds`**标志失败的Pod的重试最大时间，超过这个时间不会重试
+
 ##### CronJob 
 
 > 在特定的时间循环创建Job
@@ -660,6 +669,53 @@ CronJob管理基于时间的Job，即
 
 - 在给定的时间点调度Job运行
 - 创建周期性运行的Job，例如：数据库备份、发送邮件
+
+###### CronJob Spec
+
+- **`.spec.schedule`**:调度，必须字段，指定任务运行周期，格式同Cron
+
+- **`.spec.jobTemplate`**:Job模板，必须字段，指定需要运行的任务，格式同Job
+
+- **`.spec.startingDeadlineSeconds`**：启动Job的期限（秒级别），该字段是可选的，如果应为任何原因而错过了被调度的时间，那么错过执行时间的Job将被认为是失败的。如果没有指定，则没有期限
+
+- **`.spec.concurrencyPolicy`**:并发策略，该字段也是可选的。它制定了如何处理被CronJob创建的Job的并发执行，只允许指定下面策略中的一种
+
+  - **`Allow`(默认)**：运行并发运行Job
+
+  - **`Forbid`**：禁止并发运行，如果前一个还没有完成，则直接跳过下一个
+
+  - **`Replace`**：取消当前正在运行的Job，用一个新的来替代
+
+    **注意，当前策略只能应用于用一个CronJob创建的Job。若果存在多个CronJob，他们创建的Job之间重视允许并发运行**
+
+- **`.spec.suspend`**:挂起，该字段也是可选的。如果设置为true，后续的所有执行都会被挂起。它对已经开始执行的Job不起作用，默认为false
+
+- **`.spec.successfulJobHistoryLimit`**和**`.spec.failedJobHistoryLimit`**:历史限制，是可选的字段。它们制定了可以保留多少完成和失败的Job。默认情况下，它们分别设置为3和1.设置限制的值为0，相关类型的Job完成后不会被保留
+
+```yaml
+apiVersion: batch/b1beta1
+kind: CronJob
+metadata:
+  name: hello
+spec:
+  schedule: "*/1 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: hello
+            image: busybox
+            args:
+            - /bin/sh
+            - -c
+            - date; ceho Hello from the Kubernetes cluster
+          restartPolicy: OnFailure
+```
+
+###### CronJob本身的一些限制
+
+**创建Job操作应该是幂等的**
 
 ##### StatefulSet
 
@@ -682,7 +738,17 @@ StatefulSet是为了解决有状态服务的问题（对应Deployment和ReplicaS
 
 ### Service原理
 
+#### Service的概念
+
+**Kubernetes `Service`定义了这样一种抽象：一个`Pod`的逻辑分组，一种可以访问它们的策略———通常称之为微服务。这一组Pod能够被Service访问到，通常是通过Label Selector**
+
+![1580292382741](E:/Desktop/OneDrive/MarkDown/images/1580292382741.png)
+
 #### Service含义
+
+**Service能够提供负载均衡的能力，但是在使用上有以下限制**
+
+- **只提供4层负载均衡能力，而没有7层功能，但有时我们可能需要更多的匹配规则来转发请求，这点上4层的负载均衡是不支持的**
 
 #### Service常见分类
 
