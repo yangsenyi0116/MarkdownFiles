@@ -742,7 +742,7 @@ StatefulSet是为了解决有状态服务的问题（对应Deployment和ReplicaS
 
 **Kubernetes `Service`定义了这样一种抽象：一个`Pod`的逻辑分组，一种可以访问它们的策略———通常称之为微服务。这一组Pod能够被Service访问到，通常是通过Label Selector**
 
-![1580292382741](E:/Desktop/OneDrive/MarkDown/images/1580292382741.png)
+![1580368909196](assets/1580368909196.png)
 
 #### Service含义
 
@@ -754,17 +754,186 @@ StatefulSet是为了解决有状态服务的问题（对应Deployment和ReplicaS
 
 ##### ClusterIP
 
+**默认类型，自动分配一个仅Cluster内部可以访问的虚拟IP**
+
+**clusterIP主要在每个node节点使用iptables，将发向clsterIP对应端口的数据，转发到kube-proxy中。然后kube-proxy自己内部实现有负载均很的方法，并可以查询到这个service下对应pod的地址和端口，进而把数据转发给对应的pod的地址和端口**
+
+![1580372415399](assets/1580372415399.png)
+
+**为了实现图上的功能，主要需要以下几个组件的协同工作：**
+
+- **apiserver 用户通过kubectl命令向apiserver发送创建service的命令， apiserver接收到请求后将数据存储到etcd中**
+- **kube-proxy Kubernetes的内阁节点中都有一个叫做kube-proxy的进程，这个进程负责感知service、pod的变化，并将变化的信息写入到本地的iptables规则中**
+- **iptables通过NAT等技术将virtualIP的流量转至endpoint中**
+
+###### 例子
+
+创建deployment 
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: myapp-deploy
+  namespace: defualt
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: myapp
+      release: stabel
+    template:
+      metadata:
+        labels:
+          app: myapp
+          release: stabel
+          env: test
+      spec:
+        containers:
+        - name: myapp
+          image: ikubernetes/myapp:v2
+          imagePullPolicy: IfNotPresent
+          ports:
+          - name: http
+            containerPort: 80
+```
+
+创建Service信息
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: myapp
+  namespace: default
+spec:
+  type: ClusterIP
+  selector:
+    app: myapp
+    release: stabel
+  ports:
+  - name: http
+    port: 80
+    targetPort: 80
+```
+
+
+
 ##### NodePort
+
+**在ClusterIP基础上为Service在每台机器上绑定一个端口，这样就可以通过<NodeIP>:<NodePort>来访问该服务**
+
+**nodePort的原理在于在node上开了一个端口，将向改端口的流量导入到kube-proxy，然后由kube-proxy进一步到给对应的Pod**
+
+###### 例子
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: myapp
+  namespace: default
+spec:
+  type: NodePort
+  selector:
+    app: myapp
+    release: stabel
+  ports:
+  - name: http
+    port: 80
+    targetPort: 80
+```
+
+
+
+##### LoadBalancer
+
+**在NodePort的基础上，借助Cloud provider创建一个外部负载均衡器，并将请求转发到<NodeIP>:<NodePort>**
+
+**loadBalancer和nodePort其实是同一种方式，区别在于loadBalancer比nodePort多了一步，就是可以调用cloud provider去创建LB来向节点导流**
+
+![1580374186196](assets/1580374186196.png)
 
 ##### ExternalName
 
-#### Service实现方式
+**把集群外部的服务引入到集群内部来，在集群内部直接使用。没有任何类型代理被创建，这只有kubernetes1.7或更高版本的kube-dns才支持**
+
+![1580371078239](assets/1580371078239.png)
+
+**这种类型的Service通过返回CNAME和它的值，可以将服务映射到externalName字段的内容(例如:`hub.atguigu.com`)。ExternalName Service是Service的特例，它没有selector，也没有定义任何的端口和Endpoint。相反的，对于运行在集群外部的服务，它通过返回该外部服务的别名这种方式来提供服务**
+
+###### 例子
+
+```yaml
+kind: Service
+apiVersion: v1
+metadata:
+  name: my-service-1
+  namespace: defualt
+spec:
+  type: ExternalName
+  externalName: my.database.example.com
+```
+
+**当查询主机my-service.default.svc.cluster.local(SVC_NAME.NAMESPACE.svc.cluster.local)时，集群的DNS服务将返回一个值 my.database.example.com的CNAME记录。访问这个服务的工作方式和其他的相同，唯一不同的是重定向发生在DNS层，而且不会进行代理或转发**
+
+
+
+##### Headless Service
+
+**有时不需要或者不想要负载均衡，一级单独的Service IP。遇到这种情况，可以通过制定Cluster IP(`spec.clusterIP`)的值为"None"来创建Headless Service。这类额Service并不会分配ClusterIP，kube-proxy不会处理他们，而且平台也不会为它们进行负载均衡和路由**
+
+###### 例子
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: myapp-headless
+  namespace: default
+spec:
+  selector:
+    app: myapp
+  clusterIP: "None"
+  ports:
+  - port: 80
+    targetPort: 80
+```
+
+#### VIP和Service代理
+
+**在Kubernetes集群中，每个Node运行一个`kube.proxy`进程。`kube-proxy`负责为`serivce`实现一种VIP(虚拟IP)的形式。而不是`ExternalName`的形式。在Kubernetes v1.0版本，代理完全在userspace。在Kubernetes v1.1版本，新增了iptables代理，但并不是默认的运行模式。从Kubernetes v1.2起，默认就是iptables代理。在Kubernetes v1.8.0-beta.0中，添加了`ipvs`代理**
+
+**在Kubernetes 1.14版本开始默认使用ipvs代理**
+
+**在Kubernetes v1.0版本，`Service`是“4层”（TCP/UDP over IP） 概念。在Kubernetes v1.1版本，新增了`Ingress`API（beta版），同来表示“7层”（HTTP）服务**
+
+#### Service实现方式（代理模式的分类）
 
 ##### userspace
 
+![1580371612610](assets/1580371612610.png)
+
 ##### iptables
 
+![1580371683813](assets/1580371683813.png)
+
 ##### ipvs
+
+**这种模式，kube-proxy会监视Kubernetes`Service`对象和`Endpoints`,调用`netlink`接口以相应地创建ipvs规则并定期与Kubernetes `Service`对象和`Endpoints`对象同步ipvs规则，以确保ipvs状态与期望一致。访问服务时，流量将被重新丁香岛其中一个后端Pod**
+
+**与iptables类似，ipvs与netfilter的hook功能，但使用哈希表作为底层数据结构并在内核空间中工作。这意味着ipvs可以更快的重定向流量，并且在同步代理规则时具有更好的性能。此外，ipvs为负载均衡算法提供了更多选项，例如**
+
+- **`rr`:轮询调度**
+- **`lc`:最小连接数**
+- **`dh`:目标哈希**
+- **`sh`:源哈希**
+- **`sed`:最短期望延迟**
+- **`nq`:不排队调度**
+
+<!--注意：ipvs模式假定在运行kube-proxy之前在节点上都已经安装了IPVS内核模块。当kube-proxy以ipvs代理模式启动时，kube-proxy将验证节点上是否安装了IPVS模块，如果未安装，则kube-proxy将回退到iptables代理模式-->
+
+![1580371733556](assets/1580371733556.png)
 
 #### Ingress
 
