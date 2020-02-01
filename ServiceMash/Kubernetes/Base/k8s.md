@@ -939,15 +939,158 @@ spec:
 
 ##### Nginx
 
+**Ingress-Nginx github地址: https://github.com/kubernetes/ingress-nginx**
+
+**Ingress-Nginx 官网地址: https://kubernetes.github.io/ingress-nginx/**
+
+![1580382596010](assets/1580382596010.png)
+
+![1580382866579](assets/1580382866579.png)
+
 ###### HTTP代理访问
+
+**deployment、service、Ingress Yaml文件**
+
+```yaml
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: nginx-dm
+spec:
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        name: nginx
+    spec:
+      containers:
+        - name: nginx
+          image: wangyanglinux/app:v1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-svc
+spec:
+  ports:
+    - port: 80
+      targetPort: 80
+      protocol: TCP
+  selector:
+    name: nginx
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: nginx-test
+spec:
+  rules:
+    - host: foo.bar.com
+      http:	
+        paths:
+        - path: /
+          backend:
+            serviceName: nginx-svc
+            servicePort: 80
+```
 
 ###### HTTPS代理访问
 
+**创建证书，以及cert存储方式**
+
+```bash
+openssl req -x509 -sha256 -nodes -days 365 -newkey rsa:2048 -keyout tls.key -out tls.crt -subj "/CN=nginxsvc/O=nginxsvc"
+kubectl create secret tls tls-secret --key tls.key --cert tls.crt
+```
+
+**deployment、service、Ingress Yaml文件**
+
+```yaml
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: nginx-test
+spec:
+  tls:
+    - hosts:
+      - foo.bar.com
+      secretName: tls-secret
+  rules:
+    - host: foo.bar.com
+      http:
+        paths:
+        - path: /
+          backend:
+            serviceName: nginx-svc
+            servicePort: 80
+```
+
+
+
 ###### 使用cookie实现会话关联
 
-###### BasicAuth
+###### Nginx进行BasicAuth
+
+```bash
+yum -y install httpd
+htpasswd -C auth foo
+kubectl create secret generic basic-auth --from-file=auth
+```
+
+```yaml
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: ingress-with-auth
+  annotations:
+    nginx.ingress.kubernetes.io/auth-type: basic
+    nginx.ingress.kubernetes.io/auth-secret: basic-auth
+    nginx.ingress.kubernetes.io/auth-realm: 'Authentication Required - foo'
+spec:
+  rules:
+  - host: foo2.bar.com
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: nginx-svc
+          servicePort: 80
+```
+
+
 
 ###### Nginx进行重写
+
+| 名称                                           | 描述                                                       | 值   |
+| ---------------------------------------------- | ---------------------------------------------------------- | ---- |
+| nginx.ingress.kubernetes.io/rewrite-target     | 必须重定向流量的目标URI                                    | 串   |
+| nginx.ingress.kubernetes.io/ssl-redirect       | 只是未知部分是否仅可访问SSL(当Ingress包含证书时默认为True) | 布尔 |
+| nginx.ingress.kubernetes.io/force-ssl-redirect | 及时Ingress未启用TLS，也强制重定向到HTTPS                  | 布尔 |
+| nginx.ingress.kubernetes.io/app-root           | 定义Controller必须重定向的应用程序根，如果它在'/'上下文中  | 串   |
+| nginx.ingress.kubernetes.io/use-regex          | 只是Ingress上定义的路径是否使用正则表达式                  | 布尔 |
+
+```yaml
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: nginx-test
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: http://foo.bar.com:31795/hostname.html
+spec:
+  rules:
+  - host: foo10.bar.com
+    http:
+      paths:
+      - path: /
+        backend:
+        serviceName: nginx-svc
+        servicePort: 80
+```
+
+
 
 ## 存储
 
@@ -1029,21 +1172,118 @@ spec:
 
 #### 定义概念
 
+**ConfigMap功能在Kubernetes1.2版本版本中引入，许多应用程序会从配置文件，命令行参数或环境变量中读取配置信息。ConfigMap API给我们提供了向容器中注入配置信息的机制，ConfigMap 可以被用来保存单个属性，也可以用来保存整个配置文件或者JSON二进制大对象**
+
 #### 创建configMap
 
-##### 使用目录创建
+##### 1. 使用目录创建
 
-##### 使用文件创建
+```bash
+$ ls docs/user-gitde/configmap/kubectl
+game.properties
+ui.properties
 
-##### 使用字面值创建
+$ cat docs/user-gitde/configmap/kubectl/game.properties
+enemies=aliens
+lives=3
+enemies.cheat=true
+enemies.cheat.level=noGoodRotten
+secret.code.passphrase=UUDDLRLRBABAS
+secret.code.allowed=true
+secret.code.lives=30
+
+$ cat docs/user-guid/configmap/kubectl/ui.properties
+color.good=purple
+color.bad=yellow
+allow.textmode=true
+how.nice.to.look=firlyNice
+
+$ kubectl create configmap game-config --from-file=docs/user-guide/configmap/kubectl
+```
+
+**`-from-file`指定在目录下的所有文件都会被用在ConfigMap里面创建一个键值对，键的名字就是文件名，值就是文件的内容**
+
+##### 2. 使用文件创建
+
+**只要指定为一个文件就可以从单个文件中创建ConfigMap**
+
+```bash
+$ kubectl create configmap game-config-2 --from-file=docs/user-guide/configmap/kubectl/game.properties
+
+$ kubectl get configmaps game-config-2 -o yaml
+```
+
+**`--fomr-file`这个参数可以使用多次，你可以使用两次分别制定上个实例中的那两个配置文件，效果就是跟指定整个目录一样的**
+
+##### 3. 使用字面值创建
+
+**使用文字值创建，利用`-from-literal`参数传递配置信息，该参数可以使用多次，格式如下**
+
+```bash
+$ kubectl create configmap special-config --from-literal=special.how=very --from-literal=special.type=charm
+
+$ kubectl get configmaps special-config -o yaml
+```
+
+
 
 #### Pod中使用configMap
 
-##### ConfigMap来替代环境变量
+##### 1. 使用ConfigMap来替代环境变量
 
-##### ConfigMap设置命令行参数
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: special-config
+  namespace: default
+data:
+  special.how: very
+  special.type: charm
+```
 
-##### 通过数据卷插件使用ConfigMap
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: env-config
+  namespace: default
+data:
+  log_level: INFO
+```
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dapi-test-pod
+spec:
+  containers:
+    - name: test-container
+      image: hun.atguigu.com/library/myapp:v1
+      command: ["/bin/sh", "-c", "env"]
+      env:
+        - name: SPECIAL_LEVEL_KEY
+          valueFrom:
+            configMapKeyRef:
+              name: special-config
+              key: special.how
+        - name: SPECIAL_TPYE_KEY
+          valueFrom:
+            configMapKeyRef:
+              name: special-config
+              key: special.type
+       envFrom:
+         -configMapRef:
+           name: env-config
+  restartPolicy: Never
+```
+
+
+
+##### 2. ConfigMap设置命令行参数
+
+##### 3. 通过数据卷插件使用ConfigMap
 
 #### ConfigMap热更新
 
