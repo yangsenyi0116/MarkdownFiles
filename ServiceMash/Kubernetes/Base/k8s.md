@@ -1126,7 +1126,17 @@ spec:
 
 #### 概念定义
 
+**容器磁盘上的文件的生命周期是短暂的，这就使得在容器中运行車要应用时会出现一些问题。首先，当容器崩溃时， kubelet会重启它，但足客器中的文件将丢失——容器以干净的状态（镜像最初的状态）重新启动。其次，在`pod`中时运行多个容器时，这些容器之间通常需要共享文件。 Kubernetes中的 `Volume`抽象就很好的解决**
+
+**背景**
+
+**Kubernetes中的卷有明确的寿命——与封装它的Pod相同。所以，卷的生命比Pod中的所有容器都长，当这个容器重启时数据仍然得以保存。当然，当Pod不再存在时，卷也将不复存在。也许更重要的是， Kubernetes支持多种类型的卷，Pod可以同时使用任意数量的卷**
+
 ##### 卷的类型
+
+**Kubernetes支持以下类型的卷**
+
+- `awsElasticBlockStore` `azureDisk` `azureFile`
 
 #### emptyDir
 
@@ -1150,23 +1160,134 @@ spec:
 
 ##### 概念说明
 
+**Secret解决了密码、token、秘钥等铭感数据的配置问题，而不需要把这些敏感数据暴露到镜像或者Pod Sepc中。Secret可以以Volume或者环境变量的方式使用**
+
 ##### 分类
 
-#### Service Account
+###### 1. Service Account
 
-#### Opaque Secret
+**用来访问Kubernetes API，由Kubernetes自动创建，并且会自动挂载到Pod的`/run/secret/kubernetes.io/serviceaccount`目录中**
 
-##### 特殊说明
+```bash
+$ kubectl run nginx --image nginx
+deployment "nginx" create
+$ kubectl get pods
 
-##### 创建
+$ kubectl exec ******* ls /run/secret/kubernetes.io/serviceaccount
+ca.crt
+```
 
-##### 使用
 
-###### Secret挂载到Volume
 
-###### Secret导出到环境变量中
+###### 2. Opaque Secret
 
-#### kubernetes.io/dockerconfigjson
+**base64编码格式的Secret，用来存储密码、密钥等**
+
+**a. 创建说明**
+
+Opaque类型的数据时一个map类型，要求value是base64编码格式
+
+```bash
+$ echo -n "admin" | base64
+```
+
+**secrets.yaml**
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mysecret
+type: Opaque
+data:
+ password: *********
+ username: *********
+```
+
+**b. 使用方式**
+
+**1) 将Secret挂载到Volume中**
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    name: secret-test
+  name: secret-test
+spec:
+  volumes:
+  - name: secrets
+    secret:
+      secretName: mysecret
+  containers:
+  - image: hub.atguigu.com/library/myapp:v1
+    name: db
+    volumeMounts:
+    - name: secrets
+      moutPath: "/etc/secrets"
+      readOnlu: true
+```
+
+**2) 将Secret导出到环境变量中**
+
+```yaml
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: pod-deployment
+spec:
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        app: pod-deployment
+    spec:
+      containers:
+      - name: pod-1
+        image: hub.atguigu.com/library/myapp:v1
+        ports:
+        - containerPort: 80
+        env:
+        - name: TEST_USER
+          valueFrom:
+            secretKeyRef:
+              name: mysecret
+              key: username
+        - name: TEST_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mysecret
+              key: password
+```
+
+
+
+###### 3. kubernetes.io/dockerconfigjson
+
+**用来存储私有docker registry的认证信息**
+
+**使用kubectl创建docker registry认证的secret**
+
+```bash
+$ kubectl create secret docker-registry myregistrykey --docker-server=DOCKER_REGISTRY_SERVER --docker-username=DOCKER_USER --docker-password=DOCKER_PASSWORD --docker-email=DOCKER_EMAIL
+secret "myregistrykey" created
+```
+
+**创建Pod的时候，通过imagePullSecrets来引用刚创建的`myregistrykey`**
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: foo
+spec:
+  containers:
+    - name: foo
+      image: roc/awangyang:v1
+  imagePullSecrets:
+    - name: myregistrykey
+```
 
 ### ConfigMap
 
@@ -1283,13 +1404,159 @@ spec:
 
 ##### 2. ConfigMap设置命令行参数
 
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: special-config
+  namespace: defualt
+data:
+  special.how: very
+  special.type: charm
+```
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dapi-test-pod
+spec:
+  containers:
+    - name: test-container
+      image: hun.atguigu.com/library/myapp:v1
+      command: ["/bin/sh","-c","echo $(SPECIAL_LEVEL_KEY) $(SPECIAL_LEVEL_KEY)"]
+      env:
+        - name: SPECIAL_LEVEL_KEY
+          valueFrom:
+            configMapKeyRef:
+              name: special-config
+              key: special.how
+        - name: SPECIAL_TPYE_KEY
+          valueFrom:
+            configMapKeyRef:
+              name: special-config
+              key: special.type
+  restartPolicy: Never
+```
+
+
+
 ##### 3. 通过数据卷插件使用ConfigMap
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: special-config
+  namespace: default
+data:
+  special.how: very
+  special.type: charm
+```
+
+**在数据卷里面使用这个ConfigMap，有不同的选项。最基本的就是将文件填入数据卷，在这个文件中，键就是文件名，键值就是文件内容**
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dapi-test-pod
+spec:
+  containers:
+    - name: test-container
+      image: hun.atguigu.com/library/myapp:v1
+      command: ["/bin/sh","-c","cat /etc/config/special.how"]
+      volumeMounts:
+      - name: config-volume
+        mountPath: /etc/config
+  volumes:
+    - name: config-volume
+      configMap:
+        name: special-config
+  restartPolicy: Never
+```
+
+
 
 #### ConfigMap热更新
 
 ##### 实现演示
 
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: log-config
+  namespace: defualt
+data:
+  log_level: INFO
+---
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: my-nginx
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        run: my-nginx
+    spec:
+      containers:
+      - name: my-nginx
+        image: hub.atguigu.com/library/myapp:v1
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/config
+      volumes:
+        - name: config-volume
+          configMap:
+            name: log-config
+```
+
+```bash
+$ kubectl exec 'kubectl get pods -l run=my-nginx -o=name|cut -d"/" -f2' cat /ect/config/log_level
+INFO
+```
+
+**修改ConfigMap**
+
+```bash
+$ kubectl edit configmap log-config
+```
+
+**修改`log_level`的值为`DEBUG`等待大概10秒的时间，再次查看环境变量的值**
+
+```bash
+$ kubectl exec 'kubectl get pods -l run=my-nginx -o=name|cut -d"/" -f2' cat /ect/config/log_level
+DEBUG
+```
+
+<!--特别注意configMap如果以ENV的方式挂载至容器，修改configMap并不会实现热更新-->
+
 ##### 更新触发说明
+
+**ConfigMap更新后滚动更新Pod**
+
+更新ConfigMap目前并不会触发相关Pod的滚动更新，可以通过修改pod annotations的方式强制触发滚动更新
+
+```bash
+$ kubectl patch deployment my-nginx --patch '{"spec": {"template": {"metadata": {"annotations": {"version/config": "20190411"}}}}}'
+```
+
+这个例子中在`.spec.template.metadata.annotations`中添加`version/config`，每次通过修改`version/cong`来触发滚动更新
+
+
+
+**!!!更新ConfigMap后**
+
+- **使用该ConfigMap挂载的ENV不会同步更新**
+
+- **使用该ConfigMap挂载的Volume中的数据需要一段时间才能同步更新**
+
+  
 
 ## 调度器
 
