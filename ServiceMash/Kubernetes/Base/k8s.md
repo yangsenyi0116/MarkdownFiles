@@ -55,24 +55,46 @@
 #### 管理器管理的Pod
 ##### RS，RC
 
-![1580107441547](../../../../images/1580107441547.png)
+**ReplicationController用来确保容器应用的副本数始终保持在用户定义的副本数，即如果有容器异常退出，会自动创建新的Pod来替代；而如果异常多出来的容器也会自动回收在新版本的 Kubernetes中建议使用 ReplicaSe来取代 ReplicationControlle**
+
+**ReplicaSe跟 ReplicationController没有本质的不同，只是名字不一样，并且Replicase支持集合式的 selector**
+
+**虽然 ReplicaSe可以独立使用，但一般还是建议使用 Deployment来自动管理Repl icase，这样就无需担心跟其他机制的不兼容问题（比如 Replicase不支持rolling update但 Deployment支持）**
 
 ##### deployment
 ##### HPA
 
-![1580107883057](../../../../images/1580107883057.png)
+**Horizontal Pod Autoscaling仅适用于 Deployment和 Replicase，在V版本中仪支持根据Pod的cP利用率扩所容，在 alpha版本中，支持根据内存和用户自定义的 metric扩缩容**
 
 ##### StatefullSet
 
-![1580108023675](../../../../images/1580108023675.png)
+**Statefulset是为了解决有状态服务的问题（对应 Deployments和 Replicase是为无状态服务面设计），其应用场景包括：**
+
+- **稳定的持久化存储，即Pod重新调度后还是能访问到相同的持久化数据，基于PvC来实现**
+- **稳定的网络标志，即Pod重新调度后其 TodTnau和os不变，基于 Headless Service(即没有 Cluster IP的 Service）来实现**
+- **有序部署，有序扩展，即Pod是有顺序的，在部署或者扩展的时候要依据定义的顺序依次依次进行（即从0到N-1.在下一个Pod运行之前所有之前的Pod必须都是 Running和 Ready状态），基于 init containers来实现**
+- **有序收缩，有序剩除（即从N-1到0）**
 
 ##### DaemonSet
 
-![1580108291458](../../../../images/1580108291458.png)
+**Daemon Set确保全部（或者一些）Node上运行一个Pod的副本。当有Mode加入集群时，也会为他们新增一个Pod，当有Nod从集群移除时，这些Pd也会被回牧。删除 DemonSet将会删除它创建的所有Pod**
+
+**使用DaemonSet的一些典型用法：**
+
+- ***运行集群存储 daemon，例如在每个Node上运行 cluster、ceph**
+- **在每个Node上运行口志收集 daeron，例如 fluentd、 logstash**
+- **在每个Mde上运行监控 daemon，例如 Prometheus Node Exporter**
+
+
 
 ##### Job,Cronjob
 
-![1580108676786](../../../../images/1580108676786.png)
+**Job负责批处理任务，即仅执行一次的任务，它保证批处理任务的一个或多个Pod成功结束**
+
+**Cron Job管理基于时间的job，即：**
+
+- **在更定时间点只运行一次**
+- **周期性地在给定时间点运行**
 
 #### 服务发现
 
@@ -86,19 +108,37 @@
 
 #### 网络通讯模式说明
 
-![1580109206655](../../../../images/1580109206655.png)
+**Kubernetes的网络模型假定了所有Pod都在一个可以直接连通的扁平的网络空间中，这在GCE（ Google Compute Engine）里面是现成的网络模型， Kubernetes假定这个网络已经存在。
+而在私有云里搭建 Kubernetes集群，就不能假定这个网络已经存在了。我们需要自己实现这个网络假设，将不同节点上的 Docker容器之间的互相访问先打通，然后运行 Kubernetes**
 
-![1580109369083](../../../../images/1580109369083.png)
+- **同一个Pod内的多个容器之间：lo**
+- **各Pod之间的通讯：Overlay Network**
+- **Pod与 Service之间的通讯：各节点的 Iptables规则**
 
 1. Flannel
 
-   ![1580126007281](../../../../images/1580126007281.png)
+   **Flannel是 CoreOS团队针对 Kubernetes设计的一个网络规划服务，简单来说，它的功能是让集群中的不同节点主机创建的 Docker容器都具有全集群唯一的虚拟IP地址。而且它还能在这些IP地址之间建立一个覆盖网络（Overlay Network），通过这个覆盖网络，将数据包原封不动地传递到目标容器内**
 
 #### 组件通讯模式说明
 
-![1580126494896](../../../../images/1580126494896.png)
+**ETCD之 Flannel提供说明：**
 
-![1580126839158](../../../../images/1580126839158.png)
+- > 存储管理 Flannel可分配的IP地址段资源
+
+- > 监控ETCD中每个Pod的实际地址，并在内存中建立维护Pod节点路由表
+
+**同一个Pod内部通讯：同一个Pod共享同一个网络命名空间，共享同一个 Linux协议栈**
+
+**Podl至Pod2**
+
+- Podl与Pod2不在同一台主机，Pod地址是与 docker0在同一个网段的，但 docker0网段与宿主机网卡是两个完全不同的IP网段，并且不同Node之间的通信只能通过宿主机的物理网卡进行。将 PodINJIP和所在 NodeflJIP关联起来，通过这个关联让Pod可以互相访问
+- Podl与Pod2在同一台机器，由 Docker0网桥直接转发请求至Pod2，不需要经过 Flannel演示
+
+**Pod至 Service的网络：目前基于性能考虑，全部为 iptables维护和转发**
+
+**Pod到外网：Pod向外网发送请求，查找路由表，转发数据包到宿主机的网卡，宿主网卡完成路由选择后， iptables执行 Masquerade，把源IP更改为宿主网卡的IP，然后向外网服务器发送请求**
+
+**外网访问Pod:Service**
 
 > 最新Pod至service的网络已经改用lvs模式
 
@@ -120,7 +160,11 @@ K8s中所有的内容都抽象为资源，资源实例化之后，叫做对象
 
 #### 名称空间级别的资源
 
-![1580127320920](../../../../images/1580127320920.png)
+**工作负载型资源（ workload）：rod、 ReplicaSe、 Deployment、 StatefulSet、 Daemon Set、Job、 Cronjob（ Replication Controller在v1.11版本被废弃）**
+
+**服务发现及负载均衡型资源（ ServiceDiscovery LoadBalance）：Service、 Ingress配置与存储型资源：Volume（存储卷）、CSI（容器存储接口，可以扩展各种各样的第三方存储卷）**
+
+**特殊类型的存储卷：ConfigMap（当配置中心来使用的资源类型）、 Secret（保存敏感数据）、 DownwardAPI（把外部环境中的信息输出给容器）**
 
 - kubeadm
 
@@ -227,13 +271,37 @@ spec.containers[]下边的值
 
 如果initC没有执行成功 MainC并不会执行
 
-![1580197043885](../../../../images/1580197043885.png)
+**Pod能够具有多个容器，应用运行在容器里面，但是它也可能有一个或多个先于应用容器启动的Init容器 **
 
-![1580197278598](../../../../images/1580197278598.png)
+**Init容器与普通的容器非常像，除了如下两点:**
 
-![1580197951554](../../../../images/1580197951554.png)
+- **Init容器总是运行到成功完成为止**
 
-![1580198425120](../../../../images/1580198425120.png)
+* **每个Init器都必须在下一个Init容器启动之前成功完成**
+
+
+
+- **如果pod的Init容器失败， Kubernetes会不断地重启该pod，直到Init容器成功为止然面**
+- **如果Pod对应的 restartPolicy为 Never，它不会重新启动**
+
+**因为Init容器具有与应用程序容器分离的单独镜像，所以它们的启动相关代码具有如下优势**
+
+- 它们可以包含并运行实用工具，但是出于安全考虑，是不建议在应用程序容器镜像中包含这些实用工具的
+- 它们可以包含使用工具和定制化代码来安装，但是不能出现在应用程序镜像中。例如，创建镜像没必要FROM另一个镜像，只需要在安装过程中使用类似sed、awk、 python或dig这样的工具。
+- 应用程序镜像可以分离出创建和部署的角色，而没有必要联合它们构建一个单独的镜像。
+- Init容器使用 Linux Namespace，所以相对应用程序容器来说具有不同的文件系统视图。因此，它们能够具有访问 Secret的权限，而应用程序容器则不能
+- 它们必须在应用程序容器启动之前运行完成，而应用程容器是并行运行的，所以Init容器能够提供了一种简单的阻塞或延迟应用容器的启动的方法，直到满足了一组先决条件。
+
+
+
+- 在Pod启动过程中，Init容器会按顺序在网络和数据卷初始化之后启动。每个容器必须在下一个容器启动之前成功退出
+- 如果由于运行时或失败退出，将导致容器启动失败，它会根据Pod的 restartPolicy指定的策略进行重试。然而，如果Pod的 restartPolicy设置为 Always,Init容器失败时会使用RestartPolicy策略
+- 在所有的Init容器没有成功之前，Pod将不会变成 Ready状秦。Init容器的端口将不会在Service中进行聚集。正在初始化中的Pod处于 Pending状态，但应该会将 Initializing状态设置为true
+- 如果Pod重启，所有Init容器必须重新执行日#对Init容器spec的修改被限制在容器 lmage字段，修改其他宁段都不会生效。史改Init容器的 image字段，等价于重启该Pod
+- Init容器具有应用容器的所有字段。除了 readinessprobe，因为Init容器无法定义不同于完成（ completion）的就绪（ readiness）之外的其他状态。这会在验证过程中强制执行
+- 在Pod中的每个app和Init容器的名称必须唯一；与任何其它容器共享同一个名称，会在验证时抛出错误
+
+
 
 ##### init容器
 
@@ -1098,11 +1166,69 @@ spec:
 
 #### 概念解释
 
-##### PV
+##### `PersistentVolume`(PV)
 
-##### PVC
+**是由管理员设置的存储，它是群集的一部分。就像节点是集群中的资源样，PV也是集群中的资源。PV是Volume之类的卷插件但目有独立于使用PV的Pod的生命周期。此API对象包含存储实现的细节，即NFS iSCSI或特定于云供应商的存储系统**
 
-##### 类型说明
+##### `PersistentVolumeClaim`(PVC)
+
+**是用户存储的请求。它与Pod相似。Pod消耗节点资源，pvc消耗PV资源。Pod可以请求特定级别的资源（cpU和内存）。声明可以请求特定的大小和访问模式（例如，可以以读写一次或只读多次模式挂载）**
+
+##### 静态pv
+
+**集群管理员创建一些PⅤ，它们带有可供群集用户使用的实际存储的细节。它们存在于 Kubernetes APl中，可用于消费**
+
+##### 动态
+
+**当管理员创的静态PV都不匹配用户的 `PersistentvolumeClain`时，集群可能会尝试动态地为Pvc创建卷。此配置基于 `Storageclasses`:Pvc必须请求【储类】，井目管理员必须创建并配罟该类才能进行动态创建。声明该类为`""`可以有效地禁用其动态配置**
+
+**要启用基于存储级別的动态存储配置，集群管理员需要启用 API server上的 `DefaultstorageClass`[唯入控制器]。例如，通过确保 `Defaultstorageclass`位于 API server组件的`--admission-control`标志，使用逗号分隔的有序值列表中，可以完成比操作**
+
+##### 绑定
+
+**master中的控制环路监视新的PVC，寻找匹配的PV（如果可能），并将它们绑定在一起。如果为新的PVC动态调配PV，则该环路将始终将该PV绑定到PVC。否则，用户总会得到他们所请求的存储，但是客量可能超岀要求的数显。一旦PV和PVC绑定后， `Persistentvolumeclaim`绑定是排他性的，不管它们是如何绑定的。pVc跟PV绑定是一对一的映射**
+
+#### 持久化卷声明的保护
+
+**pvC保护的目的是确保由pod正在使用的pvC不会从系统中移除，因为如果被移除的话可能会导致数据丢失**
+
+<!--注意：当Pod状态为`Pending`并且pod已经分配给节点或pod为`Running`状态时，PVC处于活动状态-->
+
+**当启用PvC保护 alpha功能时，如果用户删除了一个pod正在使用的PVC，则该PVC不会被立即删除。PVC的删除将被推迟，直到该PVC不再被任何pod使用**
+
+#### 持久化卷类型
+
+**`PersistentVolume`类型以插件形式实现。Kubernetes目前支持以下插件类型**
+
+- **GCEPersistentDis AWSElasticBlockStore AzureFile AzureDis FC(Fibre Channel)**
+- **FlexVolume Flocker NFS iSCSI RBD(Caph Block Device) CephFS**
+- **Cinder(OpenStack block storage) Glusterfs VsphereVolume Quobyte Volumes**
+- **HostPath VMware Photon Portworx Volumes ScaleIO Volumes StorageOS**
+
+##### 持久卷演示代码
+
+```yaml
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv0003
+spec:
+  capacity:
+    storage: 5Gi
+  volumeMode: Filesystem
+  accessModes: 
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Recycle
+  storageClassName: slow
+  mountOptions:
+    - hard
+    - nfsvers=4.1
+  nfs:
+    path: /tmp
+    server: 172.17.0.2
+```
+
+
 
 #### PV
 
@@ -1110,9 +1236,38 @@ spec:
 
 ##### PV访问模式说明
 
+**`Persistent volume`可以以资源提供者支持的任何方式挂载到主机上。如下表所示，供应商目有不同的功能，每个Pv的访问模式都将被设置为该卷支持的特定模式。例如，NFS可以支持多个读/写客户端，但特定的 NFS PV可能以只读方式导出到服务器上。每个PV都有一套自己的用来描述特定功能的访问式**
+
+- **ReadWriteOnce——该卷可以被单个节点以读/写模式挂载**
+- **ReadOnlyMany——该卷可以被多个节点以只读模式挂载**
+- **ReadWriteMany——该卷可以被多个节点以读/写模式挂载**
+
+**在命令行中，访问模式缩写为**
+
+- **RWO - ReadWriteOnce**
+- **ROX - ReadOnlyMany**
+- **RWX - ReadWriteMany**
+
+<!--一个卷一次只能使用一种访问模式挂载，即使它支持很多访问模式。例如：GCEPersistentDisk可以由单个节点作为ReadWriteOnce模式挂载，或由多个节点以ReadOnlyMany模式挂载，但不能同时挂载-->
+
 ##### 回收策略
 
+- **Retain(保留): ——手动回收**
+- **Recycle(回收)：——基本擦除(`rm -rf /thevolume/*`)**
+- **Delete(删除):——关联的存储资产（例如AWS EBS、GCE PD、Azure Disk和OpenStack Cinder卷）将被删除**
+
+**当前只有NFS和HostPath支持回收策略。AWS EBS、GCE PD、Azure Disk和Cinder卷支持删除策略**
+
 ##### 状态
+
+**卷可以处以以下的某种状态**
+
+- **Available(可用) —— 一块空闲资源还没有被任何声明绑定**
+- **Bound(以绑定) —— 卷已经被声明绑定**
+- **Released(已释放) —— 声明被删除，但是资源还未被集群重新声明**
+- **Failed(失败) —— 该卷的自动回收失败**
+
+**命令行会显示绑定到PV 的PVC名称**
 
 ##### 实例演示
 
@@ -1136,23 +1291,100 @@ spec:
 
 **Kubernetes支持以下类型的卷**
 
-- `awsElasticBlockStore` `azureDisk` `azureFile`
+- `awsElasticBlockStore` `azureDisk` `azureFile` `cephfs` `cfi` `downwardAPI` `emptyDir`
+- `fc` `flocker` `gcePersistentDisk` `gitRepo` `glusterfs` **`hostPath`** `iscsi` `local` `nfs`
+- `persistentVolumeClaim` `projected` `portworxVolume` `quobyte` `rbd` `scaleIO` `secret`
+- `storageos` `vsphereVolume`
 
 #### emptyDir
 
 ##### 说明
 
+**当Pod被分配给节点时，首先创建`emptyDir`卷，并目只要该Pd在该节点上运行，该卷就会存在。正如卷的名字宁所述，它最初是空的。Pod中的容器可以读取和写入 `emptyDir`卷中的相同文件，尽管该卷可以挂载到每个容器中的相同或不同路径上。当出于任何原因从节点中删除Pod时， `emptyDir`中的数据将被永久删除**
+
+<!--注意：容器崩溃不会从节点中移除Pod，因此，`emptyDir`卷中的数据在容器崩溃时是安全的-->
+
 ##### 用途假设
 
+- **暂存空间，例如用于基于磁盘的合并排序**
+- **用作长时间计算崩溃恢复的检查点**
+- **Web服务器容器提供数据时，保存内容管理器容器提取的数据**
+
 ##### 实验演示
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-pd
+spec:
+  containers:
+  - image: k8s.gcr.io/test-webserver
+    name: test-container
+    volumeMounts:
+    - mountPath: /cache
+      name: cache-volume
+  volumes:
+  - name: cache-volume
+    emptyDir: {}
+```
+
+
 
 #### hostPath
 
 ##### 说明
 
+**`hostpath`卷将主机节点的文件系统中的文件或目录挂载到集群中**
+
 ##### 用途说明
 
+**`hostPath`的用途如下**
+
+- **运行时需要访问Docker内部的容器： 使用`/var/lib/docker`的`hostPath`**
+- **在容器中运行cAdvisor: 使用`/dev/cgroups`的`hostPaht`**
+
+**除了所需的`path`属性之外，用户还可以为`hostPath`卷指定`type`**
+
+| 值                  | 行为                                                         |
+| ------------------- | ------------------------------------------------------------ |
+|                     | 空字符串（默认）用于向后兼容，这意味看在挂载 hostPath卷之前不会执行任何检查。 |
+| `DirectoryOrCreate` | 如果在给定的路径上没有任何东西存在，那么将根据需要在那里创建一个空目录，权限设置为0755，与 Kubelet具有相同的组和所有权 |
+| `Directory`         | 给定的路径下必须存在目录                                     |
+| `FileOrCreate`      | 如果在给定的路径上没有任何东西存在，那么会根据需要创建一个空文件，权跟设置为0644，与 Kubelet具有相同的组和所有权。 |
+| `File`              | 给定的路径下必须存在文件                                     |
+| `Socket`            | 给定的路径下必须存在UNIX套接字                               |
+| `CharDevice`        | 给定的路径下必须存在字符设备                                 |
+| `BlockDevice`       | 给定的路径下必须存在块设备                                   |
+
+**使用这种卷类型时请注意，因为:**
+
+- **由于每个节点上的文件都不同，具有相同配置（例如从 podTemplate创建的）的pod在不同节点上的行为可能会有所不同**。
+- **当 Kubernetes按照计划添加资源感知调度时，将无法考虑 `host Path`使用的资源**
+- **在底层主机上创建的文件或目录只能由root写入。您需要在特权客器中以root身份运行进程，或修改主机上的文件权限以便写入 `hostpath`卷**
+
 ##### 实验演示
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-pd
+spec:
+  containers:
+  - image: k8s.gcr.io/test-webserver
+    name: test-container
+    volumeMounts:
+    - mountPaht: /test-pd
+      name: test-volume
+  volumes:
+  - name: test-volume
+    hostPath: 
+      # directory location on host
+      path: /data
+      # this field is optional
+      type: Directory
+```
 
 ### Secret
 
