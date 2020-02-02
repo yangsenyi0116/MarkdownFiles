@@ -1271,6 +1271,92 @@ spec:
 
 ##### 实例演示
 
+###### 1. 安装NFS服务器
+
+```bash
+yum install -y nfs-common nfs-utils rpcbind
+mkdir /nfsdata
+chmod 666 /nfsdata
+chown nfsnobody /nfsdata
+cat /etc/exports
+   /nfsdata *(rw,no_root-squash,no_all_squash,sync)
+systemctl start rpcbind
+systemctl start nfs
+```
+
+###### 2. 部署PV
+
+```yaml
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nfspv1
+spec:
+  capaticy:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+  persistenVolumeReclaimPolicy: Recycle
+  storageClassName: nfs
+  nfs:
+    path: /data/nfs
+    server: 10.66.66.10
+```
+
+###### 3. 创建服务并使用PVC
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx
+  labels:
+    app: nginx
+spec:
+  ports:
+  - port: 80
+    name: web
+  clusterIP: None
+  selector:
+    app: nginx
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: web
+sepc:
+  selector:
+    matchLabels:
+      app: nginx
+  serviceName: "nginx"
+  replicas: 3
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: k8s.gcr.io/nginx-slim:0.8
+        ports:
+        - containerPort: 80
+          name: web
+        volumeMounts:
+          - name: www
+            mountPath: /usr/share/nginx/html
+  voluClaimTemplates:
+  - metadata:
+      name: www
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: "nfs"
+      resources:
+        requests:
+          storage: 1Gi
+```
+
+
+
 #### PVC
 
 ##### PVC
