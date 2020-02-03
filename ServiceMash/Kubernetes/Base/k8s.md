@@ -1230,7 +1230,7 @@ spec:
 
 
 
-#### PV
+#### PV And PVC
 
 ##### 后端类型
 
@@ -1355,13 +1355,28 @@ sepc:
           storage: 1Gi
 ```
 
+#### 关于StatefulSet
 
+- **匹配 Pod name（网络标识）的模式为:$(stateful名称)-(序号)，比如上面的示例：web-0，web-1, web-2**
+- **StatefulSet为每个Pod副本创建了一个DNS域名，这个域名的格式为：$(podname).(headless server name)，也就意味着服务间是通过Pod名来通信而非 Pod ip，因为当Pod所在Node发生故障时，Pod会被飘移到其它Node上， Pod Ip会发生变化，但是Pod域名不会有变化**
+- **Statefulset使用 Headless服务来控制Pod的域名，这个域名的FQDN为:(*servicename*).(namespace)svc.cluster.local，其中，" cluster.local"指的是集群的域名**
+- **根据 volume Claim Templates，为每个Pod创建一个pvc,pvc的命名规则匹配模式:(volume.Claim.Templates.name)-(pod name)。比如上面的 volume Mounts. name=www,pod name=web-[0-2]，因此创建出来的PvC是 www-web-0、 www-web-1、 www-web2**
+- **删除Pod不会删除其pvc，手动删除pvc将自动释放pv**
 
-#### PVC
+**Statefulset的启停顺序**
 
-##### PVC
+- **有序部署：部罟 StatefulSetl时，如果有多个Pod副本，它们会被顺序地创建（从0到N-1）井且，在下一个Pod运行之前所有之前的Pod必须都足 Running和 Ready状态**
+- **有序删除：当Pod被删除时，它们被终止的顺序是从N-1到0。**
+- **有序扩展：当对Pod执行扩展操作时，与部署一样，它前面的Pod必须都处于 Running和 Ready状态。**
 
-###### 实践演示 
+**StatefulSet使用场景**
+
+- **稳定的持久化存储，即Pod新调度后还是能访问到相同的持久化数据，基于PVC来实现。**
+- **稳定的网络标识符，即Pod重新调度后其 PodName和 HostName不变。**
+- **有序部署，有序扩展，基于 init containers来实现。**
+- **有序收缩。**
+
+###### 
 
 ### Volume
 
@@ -1880,27 +1895,315 @@ $ kubectl patch deployment my-nginx --patch '{"spec": {"template": {"metadata": 
 
 ### 调度器概念
 
-#### 概念
+**Scheduler是 kubernetes的调度器，主的任务是把定义的pod分配到集群的节点上。听起来非常简单，但有很多要考虑的问题：**
+
+- **公平：如何保证每个节点都能被分配资源**
+- **资源高效利用：集群所有资源最大化被使用**
+- **效率：调度的性能要好，能够尽快地对大批星的pod完成调度工作**
+- **灵活：允许用户根据自己的需求控制调度的逻辑**
+
+**Sheduler是作为单独的程序运行的，启动之后会一直坚挺 API Server，获取 `Podspec.Nodename`为空的pod，对每个pod都会创建一个 binding，表明该pod应该放到哪个节点上**
 
 #### 调度过程
 
+**调度分为几个部分：首先是过滤掉不满足条件的节点，这个过程称为 `predicate`；然后对通过的节点按照优先级排序，这个是 `priority`;最后从中选择优先级最高的节点。如果中间任何一步獵有错误，就直接返回错误**
+
+
+
+**Perdicate有一系列的算法可以使用**
+
+- **`PodFitsResources`：节点上剩余的资源是否大于pod请求的资源**
+- **`PodFitsHost`：如果pod指定了 NodeName，检查节点名称是否和 NodeName匹配**
+- **`PodFitsHostPorts`：节点上已经使用的port是否和pod申请的port冲突**
+- **`PodSelectorMatches`：过湖掉和pod指定的 label不匹配的节点**
+
+
+
+**如果在 predicate过程中没有合适的节点，pod会一百在 `pending`状态，不断更试调度，直到有节点满足条件。经过这个步骤，如果有多个节点满足条件，就继续 priorities过程：按照优先级大小对节点排序**
+
+**优先级由一系列键值对组成，键是该优先级项的名称，值是它的权重（该项的重要性）。这些优先级选项包括**
+
+- **`LeastRequestedpriority`：通过计算cPU和 Memory的使用率来决定权重，使用率越低权重越高。换句话说，这个优先级指标倾向于资源使用比例更低的节点**
+- **`BalancedResourceAllocation`：节点上cpU和 Memory便用率越接近，权重越高。这个应该和上面的一起使用，不应该单独使用**
+- **`ImageLocalityPriority`：倾向于已经有要使用镜像的节点，镜像总大小值越大，权重越高通过算法对所有的优先级项目和权重进行计算，得出最终的结果**
+
 #### 自定义调度器
+
+**除了 kubernetes自带的调度器，你也可以编写自己的调度器。通过`spec:schedulername`参数指定调度器的名字，可以为pod选择某个调度器进行调度。比如下面的pod选择`my-scheduler`进行调度，而不是默认的`default-scheduler`**
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: annotation-second-scheduler
+  labels:
+    name: multischeduler-example
+spec:
+  schedulername: my-schedulet
+  containers:
+  - name: pod-with-second-annotation -container
+    image: gcr.io/google_containers/pause:2.0
+```
+
+
 
 ### 调度亲和度
 
-#### nodeAffinity
+#### nodeAffinity(节点亲和度)
+
+**pod.spec.nodeAffinity**
+
+- **preferredDuringChedulingIgnoredDuringExecution:软策略**
+- **requiredDuringSchedulingIgnoredDuringExecution：硬策略**
 
 ##### preferredDuringChedulingIgnoredDuringExecution
 
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: affinity
+  labels:
+    app: node-affinity-pod
+spec:
+  containers:
+  - name: with-node-affinity
+    image: hub.atguigu.com/library/myapp:v1
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 1
+        preferrnce:
+          matchExpressions:
+          - key: source
+            operator: In
+            values:
+            - qikqiak
+```
+
 ##### requiredDuringSchedulingIgnoredDuringExecution
 
-#### podAntiAffinity
+```yaml
+apiVersion: v1
+kind: pod
+metadata:
+  name: affinity
+  labels:
+    app: node-affinity-pod
+spec:
+  containers:
+  - name: with-node-affinity
+    image: hub.atguigu.com/library/myapp:v1
+  affinity:
+    nodeAffinity:
+      requiredDuringschedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: kubernetes.io/hostname
+            operator: NotIn
+            values:
+            - k8s-node02
+```
 
-##### preferredDuringSchedulingIgnoreDuringExecution
+**键值运算关系**
 
-##### requiredDuringSchedulingIgnoredDuringExecution
+- **In: label的值在某个列表中**
+- **NotIn: label的值不再某个列表中**
+- **Gt: label的值大于某个值**
+- **Lt: label的值小于某个值**
+- **Exists: 某个label存在**
+- **DoesNotExist: 某个label不存在**
 
-#### 亲和运算符
+<!--如果`nodeSelectorTers`下面有多个选项的话，满足任何一个条件就可以了，如果过`matchExpressions`有多个选项的话，则必须同时满足这些条件才能正常调度Pod-->
+
+#### podAntiAffinity(Pod亲和度)
+
+**`pod.spec.affinity.podAffinity/podAntiAffinity`**
+
+- **preferredDuringSchedulingIgnoreDuringExecution：软策略**
+- **requiredDuringSchedulingIgnoredDuringExecution：硬策略**
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-3
+  labels:
+    app: pod-3
+spec:
+  containers:
+  - name: pod-3
+    image: hub.atguigu.com/library/myapp:v1
+  affinity:
+    podAffinity:
+      requiredDuringSchedulingIngoredDuringExecution:
+      - labelSelector:
+          matchExpressions:
+          - key: app
+            operator: In
+            values:
+            - pod-1
+        topologyKey: kubernetes.io/hostname
+    podAntiAffinity:
+      preferredDuringSchedulingIngoredDuringExcecution:
+      - wight: 1
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+            - key: app
+              operator: In
+              values:
+              - pod-2
+          topologyKey: kubernetes.io/hostname
+```
+
+**亲和度/反亲和性调度策略比较如下:**
+
+| 调度策略            | 匹配标签 | 操作符                                 | 拓扑域支持 | 调度目标                       |
+| ------------------- | -------- | -------------------------------------- | ---------- | ------------------------------ |
+| **nodeAffinity**    | **主机** | **In,NotIn,Exists,DoesNotExist,Gt,Lt** | 否         | 指定主机                       |
+| **podAffinity**     | **Pod**  | **In,NotIn,Exists,DoesNotExist**       | 是         | **Pod与指定Pod同一拓扑域**     |
+| **podAnitAffinity** | **Pod**  | **In,NotIn,Exists,DoesNotExist**       | 是         | **Pod与指定Pod不在同一拓扑域** |
+
+
+
+### Taint和Toleration
+
+****
+
+**节点亲和性，是pod的一种属性（偏好或硬性要求），它使Pod被吸引到一类特定的节点。Taint则相反，它使节点能够排斥一类特定的pod**
+
+**Taint和 toleration相互配合，可以用来避免pod被分配到不合适的节点上。每个节点上都可以应用一个或多个 taint，这表示对于那些不能容忍运些 taint的pod，是不会被该节点接受的。如果将 toleration应用于pod上，则表示这些pod可以（但不要求）被调度到具有匹配 taint的节点上**
+
+#### 污点(Taint)
+
+##### 1. 污点(Taint)的组成
+
+**使用`kubectl taint`命令可以给某个Node节点设置污点，Node被设置上污点之后就和pod之间存在了一种相斥的关系，可以让Node拒绝Pod的调度执行，甚至将Node已经存在的Pod驱逐出去**
+
+**每个污点的组成如下：**
+
+```
+key=value:effect
+```
+
+**每个污点有一个key和 value作为污点的标签，其中 value可以为空， effect描述污点的作用。当前 taint effect支持如下三个选项**
+
+- **`NoSchedule`:表示k8s将不会将Pod调度到具有该污点的Node上**
+- **`PreferNoSchedule`:表示k8s将尽量避免将Pod调度到具有该污点的Node上**
+- **`NoExecute`：表示k8s将不会将Pod调度到具有该污点的Node上，同时会将Node上已经存在的Pod驱逐出去**
+
+##### 2. 污点的设置、查看和去除
+
+```bash
+# 设置污点
+kubectl taint nodes node1 key1=value1:NoSchedule
+
+# 节点说明中，查找Taints字段
+kubectl describe pod pod-name
+
+# 去除污点
+kubectl taint nodes node1 key1:NoSchedule-
+```
+
+#### 容忍(Tolerations)
+
+**设置了污点的Node将根据 taint的 effect:NoSchedule、 PreferNoSchedule、 NoExecute和Pod之间产生互斥的关系，Pod将在一定程度上不会被调度到Node上，但我们可以在Pod上设置容忍（ Toleration），原思是设置了容忍的pod将可以容忍污点的存在，可以被调度到存在污点的Node上**
+
+
+
+**pod.spec.tolerations**
+
+```yaml
+tolerations:
+- key: "key1"
+  operator: "Equal"
+  value: "value1"
+  effect: "NoSchedule"
+  tolerationSeconds: 3600
+- key: "key1"
+  operator: "Equal"
+  value: "value1"
+  effect: "NoExecute"
+- key: "key2"
+  operator: "Exists"
+  effect: "NoSchedule"
+```
+
+- **其中key,value,effect要与Node上设置的taint保持一致**
+- **operator的值为Exists将会忽略value值**
+- **tolerationSeconds用于描述当pod需要被驱逐时可以在Pod上继续保运行的时间**
+
+##### 1. 当不指定key值时，表示容忍所有的污点key:
+
+```yaml
+tolerations:
+- operator: "Exists"
+```
+
+##### 2. 当不指定effect值时，表示容忍所有的污点作用
+
+```yaml
+tolerations:
+- key: "key"
+  operator: "Exists"
+```
+
+##### 3. 有多个Master存在时，防止资源浪费，可以如下设置
+
+```bash
+kubectl taint nodes Node-Name node-role.kubernetes.io/master=:PerferNoSchedule
+```
+
+### 指定调度节点
+
+**`Pod.spec.nodeName`将Pod直接调度到指定的Node节点上，会跳过Scheduler的调度策略，该匹配规则是强制匹配**
+
+```yaml
+apiVersion: extensions/v1betal
+kind: Deployment
+metadata:
+  name: myweb
+spec:
+  replicas: 7
+  template:
+    metadata:
+      labels:
+        app: myweb
+    spec:
+      nodeName: k8s-node01
+      containers:
+      - name: myweb
+        image: hub.atguigu.com/library/myapp:v1
+        ports:
+        - containerPort: 80
+        
+```
+
+**`Pod.spec.nodeSelector`：通过Kubernetes的label-selector机制选择节点，由调度器调度策略匹配label，而后调度Pod到目标节点，该匹配规则属于强制约束**
+
+```yaml
+apiVersion: extensions/v1betal
+kind: Deployment
+metadata:
+  name: myweb
+spec:
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        app: myweb
+    spec:
+      nodeSelector:
+        type: backEndNode1
+      containers:
+      - name: myweb
+        image: harbor/tomcat:8.5-jre8
+        ports:
+        - containerPort: 80
+```
+
+
 
 ## 集群暗转机制
 
