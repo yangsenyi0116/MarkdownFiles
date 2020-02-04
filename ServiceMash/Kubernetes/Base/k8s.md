@@ -2207,9 +2207,90 @@ spec:
 
 ## 集群暗转机制
 
-### 准入控制
+### 机制说明
 
-### 鉴权
+**Kubernetes作为一个分布式集群的管理工具工保证集群的安全性是其一个重要的任务， API Server是集群内部个组件桶信的中介，也是外部控制的入口。所以 Kubernetes的安全机制基本就是围绕保护 API Server来设计的。 Kubernetes使用了认证（ Authentication）、鉴权（ Authorization），准入控制（ Admission Contro）三步来保证 API Server的安全**
+
+![1580726498905](assets/1580726498905.png)
+
+### Authentication（认证）
+
+- **Http Token认证：通过一个 Token来识别合法用户**
+  - **Http Token的认证是用一个很长的特殊编码方式的井且难以被模仿的字符串- Token来表达客户的—种方式。 Token是一个很长的很复杂的字符串，每个 Token对应一个用户名存储在 API Server能访问的文件中。当客户端发起API调用请求时，需要在 Http Header里放入 Token**
+- **Http Base认证：通过用户名+密码的方式认证**
+  - **用户名+：+密码用BASE64算法进行编码后的字符串放在 Http Request中的 Heather Authorization域里发送给服务端，服务端收到后进行编码，获取用户名及密码**
+- **最严格的 Https证书认证：基于CA根证书签名的客户端身份认证方式**
+
+#### 1. HTTPS证书认证
+
+![1580791417259](assets/1580791417259.png)
+
+#### 2. 需要认证的节点
+
+![1580791528551](assets/1580791528551.png)
+
+**两种类型**
+
+- **Kubernetes组件对API Server的访问：kubectl、Controller Manager、 Scheduler、 kubelet、kube-proxy **
+- **Kubernetes管理的Pod对容器的访问： Pod（dashborad也是以Pod形式运行）**
+
+
+
+**安全性说明**
+
+- **Controller Manager Scheduler与 API Server在同台机器，所以直接使用API Server的非安全端口访问，`-insecure-bind- address-127.0.0.1`**
+- **kubectl、 kubelet、kube- proxy访向 API Server就都需要证书进行 Https双向认证**
+
+
+
+**证书颁发**
+
+- **于动签发：通过k8s集群的跟ca进行签发 Https证书**
+- **自动签发：kubelet首次访问 API Server时，使用 token做认证，通过后， Controller Manager会为kubelet生成一个证书，以后的访问都是用证书做认证了**
+
+#### 3. kubeconfig
+
+**kubeconfig文件包含集群参数（CA证书、 API Server地址），客户端参数（上面生成的证书和私钥），集群context信息（集群名称、用户名）。 Kubenetes组件通过启动时指定不同的 kubeconfig文件可以切换到不同的集群**
+
+#### 4. ServiceAccount
+
+**Pod中的容器访向 API server。因为Pod的创建、销毁是动态的，所以要为它手动生成证书就不可行了。Kubenetes使用了 Service Account解决Pod访向 API Server的认证问题**
+
+#### 5. Secret与SA的关系
+
+**Kubernetes设计了一种资源对象叫做 Secret，分为两类，一种是用于 ServiceAccount的 service-account-token，另一种是用于保存用户自定义保密信息的 Opaque。ServiceAccount中用到包含三个部分：Token、ca.crt、namespace**
+
+- **token是便用API Server私钥签名的JwT。用于访问 API Server时， Server端认证**
+- **ca.crt，根证书。用于 Client端验证 API Server发送的证书**
+- **namespace，标识这个 service-account-token的作用域名空间**
+
+<!--Json wen token（jwt），是为了在网络应用环境间传递声明而执行的一种基于Js0N的开放标准
+（（RFC75191），该 token被设计为紧凑且安全的，特别适用于分布式站点的单点登录（sso）场景。Jwt的声明般被用来在身份提供者和服务提供者间传递被认证的用户身份信息，以使于从资源服务器获取资源，也可以增加一些额外的其它业务逻辑所必须的声明信思，该 token也可直接被用于认证，也可被加密-->
+
+```bash
+kubectl get secret --all-namespaces
+kubectl describe secret default-token-5gm9r --namespace=kube-system
+```
+
+**认情况下，每个 namespace都会有一个 ServiceAccount，如果Pod在创建时没有指定 ServiceAccount，就会使用Pod所属的 namespace的 ServiceAccount**
+
+<!--默认挂载目录: /run/secrets/kubernetes.io/serviceaccount/-->
+
+
+
+#### 总结
+
+![1580792580757](assets/1580792580757.png)
+
+### Authorization（鉴权）
+
+**上面认证过程，只是确认通信的双方都确认了对方是可信的，可以相互通信。而鉴权是确定请求方有哪些资源的权限。 API Server目前攴持以下几种授权策略（通过 API Server的启动参数`--authorization-mode`设置**
+
+- **always Deny：表示拒绝所有的请求，一般用于测试**
+- **AlwaysAllow：允许接收所有请求，如果集群不需要授权流程，则可以釆用该策眳**
+- **ABAC（ Attribute-Based Access Control）：基于属性的访问控制，表示使用用户配置的授权规则对用户请求进行匹配和控制**
+- **Webbook：通过调用外部REST服务对用户进行授权**
+- **RBAC（Role- Based Access Control）：基于角色的访问控制，现行默认规则**
 
 #### AlwaysDeny
 
@@ -2221,23 +2302,261 @@ spec:
 
 #### RBAC
 
-##### RBAC
+**RBAC（ Role- Based Access Control）基于角色的访问控制，在 Kubernetes1.5中引入，现行版本成为默认标准。相对其它访问控制方式，拥有以s下优势**
+
+- **对集群中的资源和非资源均拥有完整的覆盖**
+- **整个RBAC完全由几个API对象完成，同其它API对象一样，可以用 kubectl 或API进行操作**
+- **可以在运行时进行调整，无需重启API Server**
+
+##### RBAC的API资源对象说明
+
+**RBAC引入了4个新的顶级资源对象：Role、 ClusteRole、 RoleBinding. Cluster RoleBinding，4种对象类型均可以通过 kubect与APl操作**
+
+![1580793070993](assets/1580793070993.png)
+
+**需要注意的是 Kubenetes井不会提供用户管理，那么User、 Group、 ServiceAccount指定的用户又是从哪里来的呢？ Kubenetes组件（ kubectl, kube-proxy）或是其他自定义的用户在向CA申请证书时，需要提供一个证书请求文件**
+
+```json
+{
+    "CN": "admin",
+    "hosts": [],
+    "key": {
+        "algo": "rsa",
+        "size": 2048
+    },
+    "names": [
+        {
+            "C": "CN",
+            "ST": "HangZhou",
+            "L": "XS",
+            "O": "system:master",
+            "OU": "System"
+        }
+    ]
+}
+```
+
+**API Server会把客户端证书的`CN`字段作为User，把 `names.o`字段作为 Group**
+
+**kubelet使用 TLS Bootstaping认证时， API Server可以使用 Bootstrap Tokens或者 Token authentication file验证 token，无论哪种， Kubenetes 都会为 token绑定一个默认的User和 Group**
+
+**Pod使用 ServiceAccount认证时， service-account-token中的JWT会保存User信息**
+
+**有了用户信息，再创建一对角色角色绑定（集群角色/集群角色绑定）资源对象，就可以完成权限绑定了**
 
 ##### Role and ClusterRole
 
+**在 RBAC API中，Role表示一组规则权限，权限只会增加(累加权限），不存在一个资源开始就有很多权限而通过RBAC对其进行减少的操作；Role可以定义在一个 namespace中，如果想要跨 namespace则可以创建ClusterRole**
+
+```yaml
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  namespace: default
+  name: pod-reader
+rules:
+- apiGroups: [""]  # "" indicates the core API group
+  resources: ["pods"]
+  verbs: ["get","watch","list"]
+```
+
+
+
+**ClusterRole具有与Role相同的权限角色控制能力，不同的是 ClusterRole是集群级别的， ClusterRole可以用于:**
+
+* **集群级别的资源控制例如(node访问权限）**
+* **非资源型 endpoints（例如`/healthz`访问）**
+* **所有命名空间资源控制(例如pods）**
+
+```yaml
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  # "namespace" omitted since ClusterRoles are not namespaced
+  name: secret-reader
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "watch", "list"]
+```
+
+
+
 ##### RoleBinding and ClusterRoleBinding
+
+**RoloBinding可以将角色中定义的权限授予用户或用户组， Role Binding包含一组权限列表（subjects）。权限列表中包含有不同形式的待授予权限资源类型 (users, groups, or service accounts)； Rolo Binding同样包含对被Bind的Role引用； Role Binding适用于某个命名空间内授权，而 ClusterRole Binding适用于集群范围内的授权**
+
+**将 default命名空间的`pod-reader` Role授予jane用户，此后jane用户在 default命名空间中将具有`pod-reader`的权限**
+
+```yaml
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: read-pods
+  namespace: defualt
+subjects:
+- kind: User
+  name: jane
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: pod-reader
+  apiGroup: rbac.authorization.k8s.io
+```
+
+**Role Binding同样可以引用 Cluster role来对当前 namespace内用户、用户组或 ServiceAccount进行授权，这种操作允许集群管理员在整个集群内定义一些通用的 ClusterRole，然后在不同的 namespace中使用Role Binding来引用**
+
+**例如，以下 Role Binding引用了一个 ClusterRole，这个 ClusterRole目有个集群内对 secrets的访问权限但是其授权用户`dave`只能访问 development空间中的 secrets因为 Role binding定义在 development命名**
+
+```yaml
+# This role binding allows "dave" to read secrets in the "development" namespace
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: read-secrets
+  namespace: development # This only grants permissions within the "development" namespace
+subjects:
+- kind: User
+  name: dave
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: secret-reader
+  apiGroup: rbac.authorization.k8s.io
+```
+
+**使用 ClusterRole Binding可以对整个集群中的所有命名空间资源权限进行授权；以下 ClusterRole Binding样例展示了授权 manager组内所有用户在全部命名空间中对 secrets进行访问**
+
+```yaml
+# This role binding allows anyone in the "manager" group to read secrets in any namespace
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: read-secrets-global
+subjects:
+- kind: Group
+  name: manager
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: secret-reader
+  apiGroup: rbac.authorization.k8s.io
+```
+
+
 
 ##### Resources
 
+**Kubernetes集群内一些资源般以其名称字符串来表示，这些字符串一般会在AP的URL地址中出现；同时某些资源也会包含子资源，份logs资源就属于pods的子资源，AP中URL样例如下**
+
+```
+GET /api/v1/namespaces/{namespace}/pods/{name}/log
+```
+
+**果要在RBAC授权模型中控制这些子资源的访问权限，可以通过/分隔符來实现，以下是一个定义pods资资源logs访问权限的Role定义样例**
+
+```yaml
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  namespace: default
+  name: pod-and-pod-logs-reader
+rules:
+- apiGroups: [""]
+  resources: ["pod", "pods/log"]
+  verbs: ["get", "list"]
+```
+
+
+
 ##### to Subjects
+
+**Role Binding和ClusterRoleBinding可以将Role绑定到 Subjects:Subjects可以是 groups、 users或者service accounts**
+
+**Subjects中 Users使用字符串表示，它可以是一个普通的名字字符申，如"alice"：也可以是email格式的邮箱地址，如“ wangyanglinux@163com"；甚至是组字符串形式的数宁ID。但是 Users的前缀 system：是系统保留的，集群管理员应该确保曾诵用户不会使用这个前缀格式**
+
+**Groups书写格式与 Users相同，都为个宁符串，并且没有特定的格式要求；同样 system：前缀为系统保留**
 
 ##### 创建一个系统用户管理k8s dev名称空间：重要实验
 
-### 认证
+```bash
+{
+    "CN": "devuser",
+    "hosts": [],
+    "key": {
+        "algo": "rsa",
+        "size": 2048
+    },
+    "names": [
+        {
+            "C": "CN",
+            "ST": "BeiJing",
+            "L": "BeiJing",
+            "O": "k8s",
+            "OU": "System"
+        }
+    ]
+}
 
-#### HTTPS
+# 下载证书生成工具
+wget https://pkg.cfssl.org/R1.2/cfssl_linux-amd64
+mv cfssl_linux-amd64 /usr/local/bin/cfssl
 
-##### HTTP Base
+wget https://pkg.cfssl.org/R1.2/cfssljson_linux-amd64
+mv cfssljson_linux-amd64 /usr/local/bin/cfssljson
+
+wget https://pkg.cfssl.org/R1.2/cfssl_certinfo_linux-amd64
+mv cfssl_certinfo_linux-amd64 /usr/local/bin/cfssl-sertinfo
+
+cfssl gencert -ca=ca.crt -ca-key=ca.key -profile=kubernetes /root/devuser-csr.json | cfssljson -bare devuser
+
+# 设置集群参数
+export KUBE_APISERVER="https://172.20.0.113:6443"
+kubectl config set-cluster kubernetes \
+--certificate-authority=/etc/kubernetes/ssl/ca.pem \
+--embed-cert=true \
+--server=${KUBE_APISERVER} \
+--kubeconfig=devuser.kubeconfig
+
+# 设置客户端认证参数
+kubectl config set-credentials devuser \
+--client-certificate=/etc/kubernetes/ssl/devuser.pem \
+--client-key=/etc/kubernetes/ssl/devuser-key.pem \
+--embed-certs=true \
+--kubeconfig=devuser.kubeconfig
+
+# 设置上下文参数
+kubectl config set-context kubernetes \
+--cluster=kubernetes \
+--user=devuser \
+--namespace=dev \
+--kubeconfig=devuser.kubeconfig
+
+# 设置默认上下文
+kubectl config use-context kubernetes --kubeconfig=devuser.kubeconfig
+
+cp -f ./devuser.kubeconfig /root/.kube/config
+
+kubectl create rolebinding devuser-admin-binding --clusterrole=admin --user=devuser --namespace=dev
+```
+
+### 准入控制
+
+**准入控制是 API Server的插件集合，通过添加不同的插件，实现额外的准入控制规则。甚至于 API Server的些主要的功能都需要通过 Admission Controllers实现，比如 ServiceAccount**
+
+**官方文档上有一份针对不同版本的准入控制器推荐列表，其中最新的1.14的推荐列表是**
+
+```
+NamespaceLifecycle,LimitRanger,ServiceAccount,Defaultstorageclass,DefaultTolerationSeconds,MutatingAdmissionwebhook,ValidatingAdeissionwebhook,ResourceQuota
+```
+
+**列举几个插件的功能**
+
+- **NamespaceLifecycle：防止在不存在的 namespace上创建对象，防止删除系统预置 namespace，删除namespace时，连带删除它的所有资源对象。**
+- **LimitRanger：确保请求的资源不会超过资源所在 Namespace的 LimitRange的限制**
+- **ServiceAccount：实现了自动化添加 ServiceAccount**
+- **Resource quota：确保请求的资源不会超过资源的 Resource Quota限制**
+
 
 ## HELM
 
