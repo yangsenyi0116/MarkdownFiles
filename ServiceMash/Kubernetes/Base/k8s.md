@@ -2203,7 +2203,89 @@ spec:
         - containerPort: 80
 ```
 
+## 资源限制
 
+### Pod
+
+**Kubernetes对资源的限制实际上是通过 cgroup来控制的， cgroup是容器的一组用来控制内核如何运行进程的相关属性集合。针对内存、CPU和各种设备都有对应的 cgroup**
+
+**默认情况下，Pod运行没有cpU和内存的限额。这意味着系统中的任何Pod将能够像执行该Pod所在的节点样，消耗足够多的cpU和内存。一般会针对某些应用的pod资源进行资源限制，这个资源限制是通过resources的 requests和 limits来实现**
+
+```yaml
+spec:
+  containers:
+  - image: xxxx
+    imagePullPolict: Always
+    name: auth
+    ports:
+    - containerPort: 8080
+      protocol: TCP
+    resources:
+      limits:
+        cpu: "4"
+        memory: 2Gi
+      requests:
+        cpu: 250m
+        memory: 250Mi
+```
+
+**Requests要分配的资源，limits为最高请求的资源值，可以简单理解为初始值和最大值**
+
+### 名称空间
+
+#### 1. 计算资源配额
+
+```yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: compute-resources
+  namespace: spark-cluster
+spec:
+  hard:
+    pods: "20"
+    requests.cpu: "20"
+    requests.memory: 100Gi
+    limits.cpu: "40"
+    limits.memory: 200Gi
+```
+
+#### 2. 配置对象数量配额限制
+
+```yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: object-counts
+  namespace: spark-cluster
+spec:
+  hard:
+    configmaps: "10"
+    persistenevolumeclaims: "4"
+    replicationcontrollers: "20"
+    secrets: "10"
+```
+
+#### 3. 配置CPU和内存LimitRange
+
+```yaml
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: mem-limit-range
+spec:
+  limits:
+  - default:
+    memory: 50Gi
+    cpu: 5
+  defaultRequest:
+    memory: 1Gi
+    cpu: 1
+  type: Container
+```
+
+- `default`即limit的值
+- `defaultRequest`即request的值
 
 ## 集群暗转机制
 
@@ -2562,34 +2644,928 @@ NamespaceLifecycle,LimitRanger,ServiceAccount,Defaultstorageclass,DefaultTolerat
 
 ### HELM概念
 
+**在没使用helm之前，向 kubernetes部罟应用，我们要依次部罟 deployment、sv等，步骤较緊琐。况且随着很多项目微服劣化，复杂的应用在客器中部署以及管理显得较为复杂，helm通过打包的方式，支持发布的版本管理和控制，很大程度上简化了 Kubernetes应用的部罟和管理**
+
+**helm本质就是让K8s的应用管理（ Deployment, Service等）可配置，能动态生成。通过动态生成K8s资源清单文件（ deployment.yaml, service.yaml）。然后调用 Kubectl自动执行K8s资源部署**
+
+
+
 #### HELM概念说明
+
+**Helm是官方提供的类似于YUM的包管理器，是部署环境的流程封装。Helm有两个重要的概念：chart和release**
+
+- **chart是创建一个应用的信息集合，包括各种 Kubernetes对象的配置模板、参数定义、依赖关系、文档说等。 chart是应用部署的自包含逻辑单元。可以将 chart想象成apt、yum中的软件安装包**
+- **release是 chart的运行实例，代表了一个正在运行的应用。当 chart被安装到 Kubernetes集群，就生成一个 release. chart能够多次安装到同一个集群，每次安装都是一个 releas**
 
 #### 组件构成
 
+**Helm包含两个组件：Helm客户端和 Tiller服务器，如下图所示**
+
+![1580796890396](assets/1580796890396.png)
+
+**Hem客户端负责 chart和 release的创建和管理以及和Tier的交互。 Tiller服务器运行在 Kubernetes集群中，它会处理Hem客户端的请求，与 Kubernetes Apl server交互**
+
 #### HELM部署
 
+越来越多的公司和国队开始使用Hem这个 Kubernetes的包理器，我们池将使用Helm安装 Kubernetes的常用件。Helm由客户端helm工具和版务端tiller组成，Helm的安装十分筒单。下helm命令行工具到master节点noed1的 /usr/local/bin下，这里下的2.13.1版本:
+
+```bash
+ntpdate ntp1.aliyun.com
+wget https://storage.googleapis.com/kubernetes-helm/helm-v2.13.1-linux-amd64.tar.gz
+tar -zxvf helm-v2.13.1-linux-amd64.tar.gz
+cd linux-amd64/
+cp helm /usr/local/bin
+```
+
+**为了安装服务端 tiller.还需要在这台机器上配置好 kubectl工具和 kubeconfig文件，确保 kubectl工具可以在这台机器上访问 pserver且正常使用。这里的node1节点以及配置好了 kubectl**
+
+**因为 Kubernetes Apiserver升启了RBAC访问控制，所以需雯创建 tiller使用的 service account:tilr#分配合话的角色给它。详细内容可以查看hem文档中的 [Role-based Access Control](https://docs.helm.sh/user_helm/#rol-based-access-control)。这里简单起直接分配cluster-admin这个集群内置的ClusterRole给他。创建rbac-config.yaml文件**
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tiller
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+  name: tiller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: tiller
+    namespace: kube-system
+```
+
+```bash
+kubectl create -f rbac-config.yaml
+     serviceaccount/tiller created
+     clusterrolebinding.rbac.authorization.k8s.io/tiller created
+```
+
+```bash
+helm init --service-account tiller --skip-refresh
+```
+
+
+
 #### HELM自定义
+
+```bash
+# 创建文件夹
+$ mkdir ./hello-world
+$ cd ./hello-world
+```
+
+```bash
+# 创建自描述文件Chart.yaml,这个文件必须有name和version定义
+$ cat <<'EOF' > ./Chart.yaml
+name: hello-world
+version: 1.0.0
+EOF
+```
+
+```bash
+# 创建模板文件，用于生成Kubernetes资源清单(manifests)
+$ mkdir ./templates
+$ cat <<'EOF' > ./template/deployment.yaml
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: hello-world
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: hello-world
+    spec:
+      containers:
+        - name: hello-world
+          image: hub.atguigu.com/library/myapp:v1
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+EOF
+$ car <<'EOF' > ./template/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-world
+spec:
+  type: NodePort
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+  selector:
+    app: hello-world
+EOF
+```
+
+```bash
+# 使用命令 helm install RELATIVE_PATH_CHART 创建一次Release
+$ helm install
+```
+
+```bash
+# 列出已经部署的Release
+$ helm ls
+# 查询一个特定的Release的状态
+$ helm status RELEASE_NAME
+# 移除所有与这个Release相关的Kubernetes资源
+$ helm delete cautious-shrimp
+$ helm rollback RELEASE_NAME REVISION_NUMBER
+$ helm rollback cautious-shrimp 1
+# 使用helm delete --purge RELEASE_NAME移除所有与指定Release相关的Kubernetes资源和所有这个Release的记录
+$ helm delete --purge cautious-shrimp
+$ helm ls --deleted
+```
+
+```bash
+# 配置即现在配置文件values.yaml
+$ cat <<'EOF' > ./values.yaml
+image:
+  repository: gcr.io/google-tamples/node-hello
+  tag: '1.0'
+EOF
+
+# 这个文件中定义的值，在模板文件中可以通过.Values对象访问到
+$ cat <<'EOF' > ./template/deployment.yaml
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: hello-world
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: hello-world
+    spec:
+      containers:
+        - name: hello-world
+          image: {{.Values.image.repository}}:{{.Values.image.tag}}
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+EOF
+
+# 在Values.taml 中的值可以被部署Release时用到的参数 --values TAML_FILE_PATH 或 --setkey1=value1, key2=value2
+$ helm install --set image.tag='latest' .
+
+# 升级版本
+$ helm upgrade -f values.yaml test .
+```
+
+### Debug
+
+```bash
+# 使用模板动态生成k8s资源清单，非常需要能提前预览生成的结果
+# 使用--dry-run --debug选项来答应出生成的清单文件内容，而不执行部署
+helm install . --dry-run --debug --set image.tag=lateset
+```
+
+
 
 ### HELM部署实例
 
 #### HELM部署dashboard
 
+**Kubernetes-dashboard.yaml**
+
+```yaml
+image:
+  repository: k8s.gcr.io/kubernetes-dashboard-amd64
+  tag: v1.10.1
+ingress:
+  enabled: true
+  hosts:
+    - k8s.frognew.com
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+  tls:
+    - secretName: frognew-com-tls-secret
+      hosts:
+      - k8s.frognew.com
+rbac:
+  clusterAdminRole: true
+```
+
+```bash
+helm install stable/kubernetes-dashboard \
+-n kubernetes-dashboard \
+--namespace kube-system \
+-f kubernetes-dashboard.yaml
+```
+
+```bash
+kubectl -n kube-system get secret | grep kubernetes-dashboard-token
+```
+
+```bash
+kubectl edit svc kubernetes-dashboard -n kube-system
+修改ClusterIP为NodePort
+```
+
+
+
 #### metrics-server
 
 ##### HPA演示
 
-##### 资源限制
-
-###### Pod
-
-###### 名称空间
+###### 
 
 #### Prometheus
 
+githubd地址: https://github.com/coreos/kube-prometheus
+
+##### 组件说明
+
+1. MetricServer：是 kubernetes集群资源使用信况的合器，收箕数据 cubernetes集萨内使用，如kubectl, hpa, scheduler等
+2. PrometheusOperator：是一个系统监测和签报工具箱，用来存情监控据
+3. Node Exporter：用于各node的关键度量指标状态数据。
+4. KubeStateMetrics：收集 kubernetes集群内资源对象数据，制定告警规则。
+5. Promethus：采用则方式收 pserver, scheduler, contro∥ er-manoger, kubelet组件数据，通过http协议创术
+6. Grafana：是可视化数据统计和监控平台。
+
 #### EFK
+
+###### 添加Google incubator仓库
+
+```bash
+helm repo add incubator http://storage.googleapis.com/kubernetes-charts-incubator
+```
+
+###### 部署Elasticseach
+
+```bash
+kubectl create namespace efk
+helm fetch incubator/elasticsearch
+helm install --name els1 --namespace=efk -f values.yaml incubator/elasticsearch kubectl run cirror-$RANDOM --rm -it --image=cirros -- /bin/sh
+	curl Elasticsearch:Port/_cat/nodes
+```
+
+###### 部署Fluentd
+
+```bash
+helm fetch stable/fluentd-elasticsearch
+vim values.yaml
+	# 更改其中Elasticsearch 访问地址
+helm install --name flu1 --namespace=efk -f values.yaml stable/fluentd-elasticsearch
+```
+
+###### 部署kibana
+
+```bash
+helm fetch stable/kibana --version 0.14.8
+helm install --name kib1 --namespace=efk -f values.yaml stable/kibana --version 0.14.8
+```
+
+
+
+#### Horizontal Pod Authscaling
+
+**Horizontal Pod Autoscaling可以根据CPU利用率自动伸缩一个 Replication Controller Deployment或者 Replica Set中的Pod数量**
 
 ## 运维
 
 ### Kubeadm源码修改
 
+#### 证书有效期
+
+##### 1. 安装go语言
+
+##### 2. 下载源码
+
+```bash
+cd /data && git clone https://github.com/kubernetes/kubernets.git
+git chekout -b remotes/origin/release-1.15.1 v1.15.1
+```
+
+##### 3. 修改Kubeadm源码包更新证书策略
+
+```bash
+vim staging/src/k8s.io/client-go/util/cert/cert.go # kubeamd 1.14版本之前
+vim cmd/kubeadm/app/til/pkiutil/pki_helpers.go # kubeadm 1.14至今
+	const duration365d = time.Hour * 24 * 365
+	NotAfter: time.Now().Add(duration365d).UTC(),
+	
+make WHAT=cmd/kubeadm GFLAGS=-v
+cp _output/bin/kubeadm /root/kubeadm-new
+```
+
+##### 4. 更新kubeadm
+
+```bash
+# 将kubeadm进行替换
+cp /usr/bin/kubeadm /usr/bin/kubeadm.old
+cp /root/kubeadm-new /usr/bin/kubadm
+chmod a+x /usr/bin/kubeadm
+```
+
+##### 5. 更新个节点证书到master节点
+
+```bash
+cp -r /etc/kubernetes/pki /etc/kubernetes/pki.old
+
+kubeadm alpha certs renew all --config=/usr/local/install-k8s/core/kubeadm-config.yaml
+```
+
+
+
 ### Kubernetes高可用构建
+
+#### 统一环境配置
+
+**节点配置**
+
+| 主机名               | IP              | 角色   | 系统                | CPU/内存 | 磁盘 |
+| -------------------- | --------------- | ------ | ------------------- | -------- | ---- |
+| kubernetes-master-01 | 192.168.141.150 | Master | Ubuntu Server 18.04 | 2核2G    | 20G  |
+| kubernetes-master-02 | 192.168.141.151 | Master | Ubuntu Server 18.04 | 2核2G    | 20G  |
+| kubernetes-master-03 | 192.168.141.152 | Master | Ubuntu Server 18.04 | 2核2G    | 20G  |
+| kubernetes-node-01   | 192.168.141.160 | Node   | Ubuntu Server 18.04 | 2核4G    | 20G  |
+| kubernetes-node-02   | 192.168.141.161 | Node   | Ubuntu Server 18.04 | 2核4G    | 20G  |
+| kubernetes-node-03   | 192.168.141.162 | Node   | Ubuntu Server 18.04 | 2核4G    | 20G  |
+| Kubernetes VIP       | 192.168.141.200 | -      | -                   | -        | -    |
+
+#### 操作系统配置
+
+##### 关闭交换空间
+
+```bash
+swapoff -a
+```
+
+##### 避免开机启动交换空间
+
+```bash
+# 注释 swap 开头的行
+vi /etc/fstab
+```
+
+##### 关闭防火墙
+
+```bash
+ufw disable
+```
+
+##### 配置 DNS
+
+```bash
+# 取消 DNS 行注释，并增加 DNS 配置如：114.114.114.114，修改后重启下计算机
+vi /etc/systemd/resolved.conf
+```
+
+##### 安装 Docker
+
+```bash
+# 更新软件源
+sudo apt-get update
+# 安装所需依赖
+sudo apt-get -y install apt-transport-https ca-certificates curl software-properties-common
+# 安装 GPG 证书
+curl -fsSL http://mirrors.aliyun.com/docker-ce/linux/ubuntu/gpg | sudo apt-key add -
+# 新增软件源信息
+sudo add-apt-repository "deb [arch=amd64] http://mirrors.aliyun.com/docker-ce/linux/ubuntu $(lsb_release -cs) stable"
+# 再次更新软件源
+sudo apt-get -y update
+# 安装 Docker CE 版
+sudo apt-get -y install docker-ce
+```
+
+##### 配置 Docker 加速器
+
+> 特别注意：国内镜像加速器可能会很卡，请替换成你自己阿里云镜像加速器，地址如：`https://yourself.mirror.aliyuncs.com`，在阿里云控制台的 **容器镜像服务 -> 镜像加速器** 菜单中可以找到
+
+在 `/etc/docker/daemon.json` 中写入如下内容（如果文件不存在请新建该文件）
+
+```json
+{
+  "registry-mirrors": [
+    "https://registry.docker-cn.com"
+  ]
+}
+```
+
+##### 安装 kubeadm，kubelet，kubectl
+
+```bash
+# 安装系统工具
+apt-get update && apt-get install -y apt-transport-https
+
+# 安装 GPG 证书
+curl https://mirrors.aliyun.com/kubernetes/apt/doc/apt-key.gpg | apt-key add -
+
+# 写入软件源；注意：我们用系统代号为 bionic，但目前阿里云不支持，所以沿用 16.04 的 xenial
+cat << EOF >/etc/apt/sources.list.d/kubernetes.list
+> deb https://mirrors.aliyun.com/kubernetes/apt/ kubernetes-xenial main
+> EOF
+
+# 安装
+apt-get update && apt-get install -y kubelet kubeadm kubectl
+```
+
+##### 同步时间
+
+**设置时区**
+
+```bash
+dpkg-reconfigure tzdata
+```
+
+选择 **Asia（亚洲）**
+
+选择 **Shanghai（上海）**
+
+###### **时间同步**
+
+```bash
+# 安装 ntpdate
+apt-get install ntpdate
+
+# 设置系统时间与网络时间同步（cn.pool.ntp.org 位于中国的公共 NTP 服务器）
+ntpdate cn.pool.ntp.org
+
+# 将系统时间写入硬件时间
+hwclock --systohc
+```
+
+###### **确认时间**
+
+```bash
+date
+
+# 输出如下（自行对照与系统时间是否一致）
+Sun Jun  2 22:02:35 CST 2019
+```
+
+##### 配置 IPVS
+
+```bash
+# 安装系统工具
+apt-get install -y ipset ipvsadm
+
+# 配置并加载 IPVS 模块
+mkdir -p /etc/sysconfig/modules/
+vi /etc/sysconfig/modules/ipvs.modules
+
+# 输入如下内容
+#!/bin/bash
+modprobe -- ip_vs
+modprobe -- ip_vs_rr
+modprobe -- ip_vs_wrr
+modprobe -- ip_vs_sh
+modprobe -- nf_conntrack_ipv4
+
+# 执行脚本，注意：如果重启则需要重新运行该脚本
+chmod 755 /etc/sysconfig/modules/ipvs.modules && bash /etc/sysconfig/modules/ipvs.modules && lsmod | grep -e ip_vs -e nf_conntrack_ipv4
+
+# 执行脚本输出如下
+ip_vs_sh               16384  0
+ip_vs_wrr              16384  0
+ip_vs_rr               16384  0
+ip_vs                 147456  6 ip_vs_rr,ip_vs_sh,ip_vs_wrr
+nf_conntrack_ipv4      16384  3
+nf_defrag_ipv4         16384  1 nf_conntrack_ipv4
+nf_conntrack          131072  8 xt_conntrack,nf_nat_masquerade_ipv4,nf_conntrack_ipv4,nf_nat,ipt_MASQUERADE,nf_nat_ipv4,nf_conntrack_netlink,ip_vs
+libcrc32c              16384  4 nf_conntrack,nf_nat,raid456,ip_vs
+```
+
+##### 配置内核参数
+
+```bash
+# 配置参数
+vi /etc/sysctl.d/k8s.conf
+
+# 输入如下内容
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables = 1
+net.ipv4.ip_nonlocal_bind = 1
+net.ipv4.ip_forward = 1
+vm.swappiness=0
+
+# 应用参数
+sysctl --system
+
+# 应用参数输出如下（找到 Applying /etc/sysctl.d/k8s.conf 开头的日志）
+* Applying /etc/sysctl.d/10-console-messages.conf ...
+kernel.printk = 4 4 1 7
+* Applying /etc/sysctl.d/10-ipv6-privacy.conf ...
+* Applying /etc/sysctl.d/10-kernel-hardening.conf ...
+kernel.kptr_restrict = 1
+* Applying /etc/sysctl.d/10-link-restrictions.conf ...
+fs.protected_hardlinks = 1
+fs.protected_symlinks = 1
+* Applying /etc/sysctl.d/10-lxd-inotify.conf ...
+fs.inotify.max_user_instances = 1024
+* Applying /etc/sysctl.d/10-magic-sysrq.conf ...
+kernel.sysrq = 176
+* Applying /etc/sysctl.d/10-network-security.conf ...
+net.ipv4.conf.default.rp_filter = 1
+net.ipv4.conf.all.rp_filter = 1
+net.ipv4.tcp_syncookies = 1
+* Applying /etc/sysctl.d/10-ptrace.conf ...
+kernel.yama.ptrace_scope = 1
+* Applying /etc/sysctl.d/10-zeropage.conf ...
+vm.mmap_min_addr = 65536
+* Applying /usr/lib/sysctl.d/50-default.conf ...
+net.ipv4.conf.all.promote_secondaries = 1
+net.core.default_qdisc = fq_codel
+* Applying /etc/sysctl.d/99-sysctl.conf ...
+* Applying /etc/sysctl.d/k8s.conf ...
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables = 1
+net.ipv4.ip_nonlocal_bind = 1
+net.ipv4.ip_forward = 1
+vm.swappiness = 0
+* Applying /etc/sysctl.conf ...
+```
+
+##### 修改 cloud.cfg
+
+```bash
+vi /etc/cloud/cloud.cfg
+
+# 该配置默认为 false，修改为 true 即可
+preserve_hostname: true
+```
+
+##### 单独节点配置
+
+> 特别注意：为 Master 和 Node 节点单独配置对应的 **IP** 和 **主机名**
+
+##### 配置 IP
+
+编辑 `vi /etc/netplan/50-cloud-init.yaml` 配置文件，修改内容如下
+
+```yaml
+network:
+    ethernets:
+        ens33:
+          # 我的 Master 是 150 - 152，Node 是 160 - 162
+          addresses: [192.168.141.150/24]
+          gateway4: 192.168.141.2
+          nameservers:
+            addresses: [192.168.141.2]
+    version: 2
+```
+
+使用 `netplan apply` 命令让配置生效
+
+##### 配置主机名
+
+```bash
+# 修改主机名
+hostnamectl set-hostname kubernetes-master-01
+
+# 配置 hosts
+cat >> /etc/hosts << EOF
+192.168.141.150 kubernetes-master-01
+EOF
+```
+
+#### 安装 HAProxy + Keepalived
+
+##### 概述
+
+Kubernetes Master 节点运行组件如下：
+
+- **kube-apiserver：** 提供了资源操作的唯一入口，并提供认证、授权、访问控制、API 注册和发现等机制
+- **kube-scheduler：** 负责资源的调度，按照预定的调度策略将 Pod 调度到相应的机器上
+- **kube-controller-manager：** 负责维护集群的状态，比如故障检测、自动扩展、滚动更新等
+- **etcd：** CoreOS 基于 Raft 开发的分布式 key-value 存储，可用于服务发现、共享配置以及一致性保障（如数据库选主、分布式锁等）
+
+`kube-scheduler` 和 `kube-controller-manager` 可以以集群模式运行，通过 leader 选举产生一个工作进程，其它进程处于阻塞模式。
+
+**kube-apiserver 可以运行多个实例，但对其它组件需要提供统一的访问地址，本章节部署 Kubernetes 高可用集群实际就是利用 HAProxy + Keepalived 配置该组件**
+
+配置的思路就是利用 HAProxy + Keepalived 实现 `kube-apiserver` 虚拟 IP 访问从而实现高可用和负载均衡，拆解如下：
+
+- Keepalived 提供 `kube-apiserver` 对外服务的虚拟 IP（VIP）
+- HAProxy 监听 Keepalived VIP
+- 运行 Keepalived 和 HAProxy 的节点称为 LB（负载均衡） 节点
+- Keepalived 是一主多备运行模式，故至少需要两个 LB 节点
+- Keepalived 在运行过程中周期检查本机的 HAProxy 进程状态，如果检测到 HAProxy 进程异常，则触发重新选主的过程，VIP 将飘移到新选出来的主节点，从而实现 VIP 的高可用
+- 所有组件（如 kubeclt、apiserver、controller-manager、scheduler 等）都通过 VIP +HAProxy 监听的 6444 端口访问 `kube-apiserver` 服务（**注意：kube-apiserver 默认端口为 6443，为了避免冲突我们将 HAProxy 端口设置为 6444，其它组件都是通过该端口统一请求 apiserver**）
+
+![负载均衡架构图](assets/20190427104124213.png)
+
+##### 创建 HAProxy 启动脚本
+
+> 该步骤在 `kubernetes-master-01` 执行
+
+```bash
+mkdir -p /usr/local/kubernetes/lb
+vi /usr/local/kubernetes/lb/start-haproxy.sh
+
+# 输入内容如下
+#!/bin/bash
+# 修改为你自己的 Master 地址
+MasterIP1=192.168.141.150
+MasterIP2=192.168.141.151
+MasterIP3=192.168.141.152
+# 这是 kube-apiserver 默认端口，不用修改
+MasterPort=6443
+
+# 容器将 HAProxy 的 6444 端口暴露出去
+docker run -d --restart=always --name HAProxy-K8S -p 6444:6444 \
+        -e MasterIP1=$MasterIP1 \
+        -e MasterIP2=$MasterIP2 \
+        -e MasterIP3=$MasterIP3 \
+        -e MasterPort=$MasterPort \
+        wise2c/haproxy-k8s
+
+# 设置权限
+chmod +x start-haproxy.sh
+```
+
+##### 创建 Keepalived 启动脚本
+
+> 该步骤在 `kubernetes-master-01` 执行
+
+```bash
+mkdir -p /usr/local/kubernetes/lb
+vi /usr/local/kubernetes/lb/start-keepalived.sh
+
+# 输入内容如下
+#!/bin/bash
+# 修改为你自己的虚拟 IP 地址
+VIRTUAL_IP=192.168.141.200
+# 虚拟网卡设备名
+INTERFACE=ens33
+# 虚拟网卡的子网掩码
+NETMASK_BIT=24
+# HAProxy 暴露端口，内部指向 kube-apiserver 的 6443 端口
+CHECK_PORT=6444
+# 路由标识符
+RID=10
+# 虚拟路由标识符
+VRID=160
+# IPV4 多播地址，默认 224.0.0.18
+MCAST_GROUP=224.0.0.18
+
+docker run -itd --restart=always --name=Keepalived-K8S \
+        --net=host --cap-add=NET_ADMIN \
+        -e VIRTUAL_IP=$VIRTUAL_IP \
+        -e INTERFACE=$INTERFACE \
+        -e CHECK_PORT=$CHECK_PORT \
+        -e RID=$RID \
+        -e VRID=$VRID \
+        -e NETMASK_BIT=$NETMASK_BIT \
+        -e MCAST_GROUP=$MCAST_GROUP \
+        wise2c/keepalived-k8s
+
+# 设置权限
+chmod +x start-keepalived.sh
+```
+
+##### 复制脚本到其它 Master 地址
+
+分别在 `kubernetes-master-02` 和 `kubernetes-master-03` 执行创建工作目录命令
+
+```bash
+mkdir -p /usr/local/kubernetes/lb
+```
+
+将 `kubernetes-master-01` 中的脚本拷贝至其它 Master
+
+```bash
+scp start-haproxy.sh start-keepalived.sh 192.168.141.151:/usr/local/kubernetes/lb
+scp start-haproxy.sh start-keepalived.sh 192.168.141.152:/usr/local/kubernetes/lb
+```
+
+分别在 3 个 Master 中启动容器（执行脚本）
+
+```bash
+sh /usr/local/kubernetes/lb/start-haproxy.sh && sh /usr/local/kubernetes/lb/start-keepalived.sh
+```
+
+##### 验证是否成功
+
+###### 查看容器
+
+```bash
+docker ps
+```
+
+###### 查看网卡绑定的虚拟 IP
+
+```bash
+ip a | grep ens33
+```
+
+> 特别注意：Keepalived 会对 HAProxy 监听的 6444 端口进行检测，如果检测失败即认定本机 HAProxy 进程异常，会将 VIP 漂移到其他节点，所以无论本机 Keepalived 容器异常或 HAProxy 容器异常都会导致 VIP 漂移到其他节点
+
+#### 部署 Kubernetes 集群
+
+##### 初始化 Master
+
+- 创建工作目录并导出配置文件
+
+```bash
+# 创建工作目录
+mkdir -p /usr/local/kubernetes/cluster
+
+# 导出配置文件到工作目录
+kubeadm config print init-defaults --kubeconfig ClusterConfiguration > kubeadm.yml
+```
+
+- 修改配置文件
+
+```yaml
+apiVersion: kubeadm.k8s.io/v1beta1
+bootstrapTokens:
+- groups:
+  - system:bootstrappers:kubeadm:default-node-token
+  token: abcdef.0123456789abcdef
+  ttl: 24h0m0s
+  usages:
+  - signing
+  - authentication
+kind: InitConfiguration
+localAPIEndpoint:
+  # 修改为主节点 IP
+  advertiseAddress: 192.168.141.150
+  bindPort: 6443
+nodeRegistration:
+  criSocket: /var/run/dockershim.sock
+  name: kubernetes-master
+  taints:
+  - effect: NoSchedule
+    key: node-role.kubernetes.io/master
+---
+apiServer:
+  timeoutForControlPlane: 4m0s
+apiVersion: kubeadm.k8s.io/v1beta1
+certificatesDir: /etc/kubernetes/pki
+clusterName: kubernetes
+# 配置 Keepalived 地址和 HAProxy 端口
+controlPlaneEndpoint: "192.168.141.200:6444"
+controllerManager: {}
+dns:
+  type: CoreDNS
+etcd:
+  local:
+    dataDir: /var/lib/etcd
+# 国内不能访问 Google，修改为阿里云
+imageRepository: registry.aliyuncs.com/google_containers
+kind: ClusterConfiguration
+# 修改版本号
+kubernetesVersion: v1.14.2
+networking:
+  dnsDomain: cluster.local
+  # 配置成 Calico 的默认网段
+  podSubnet: "192.168.0.0/16"
+  serviceSubnet: 10.96.0.0/12
+scheduler: {}
+---
+# 开启 IPVS 模式
+apiVersion: kubeproxy.config.k8s.io/v1alpha1
+kind: KubeProxyConfiguration
+featureGates:
+  SupportIPVSProxyMode: true
+mode: ipvs
+```
+
+- kubeadm 初始化
+
+```bash
+# kubeadm 初始化
+kubeadm init --config=kubeadm.yml --experimental-upload-certs | tee kubeadm-init.log
+
+# 配置 kubectl
+mkdir -p $HOME/.kube
+cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+chown $(id -u):$(id -g) $HOME/.kube/config
+
+# 验证是否成功
+kubectl get node
+```
+
+- 安装网络插件
+
+```bash
+# 安装 Calico
+kubectl apply -f https://docs.projectcalico.org/v3.7/manifests/calico.yaml
+
+# 验证安装是否成功
+watch kubectl get pods --all-namespaces
+```
+
+##### 加入 Master 节点
+
+从 `kubeadm-init.log` 中获取命令，分别将 `kubernetes-master-02` 和 `kubernetes-master-03` 加入 Master
+
+```bash
+# 以下为示例命令
+kubeadm join 192.168.141.200:6444 --token abcdef.0123456789abcdef \
+  --discovery-token-ca-cert-hash sha256:56d53268517c132ae81c868ce99c44be797148fb2923e59b49d73c99782ff21f \
+  --experimental-control-plane --certificate-key c4d1525b6cce4b69c11c18919328c826f92e660e040a46f5159431d5ff0545bd
+```
+
+##### 加入 Node 节点
+
+从 `kubeadm-init.log` 中获取命令，分别将 `kubernetes-node-01` 至 `kubernetes-node-03` 加入 Node
+
+```bash
+# 以下为示例命令
+kubeadm join 192.168.141.200:6444 --token abcdef.0123456789abcdef \
+    --discovery-token-ca-cert-hash sha256:56d53268517c132ae81c868ce99c44be797148fb2923e59b49d73c99782ff21f 
+```
+
+##### 验证集群状态
+
+- 查看 Node
+
+```bash
+kubectl get nodes -o wide
+```
+
+- 查看 Pod
+
+```bash
+kubectl -n kube-system get pod -o wide
+```
+
+- 查看 Service
+
+```bash
+kubectl -n kube-system get svc
+```
+
+- 验证 IPVS
+
+查看 kube-proxy 日志，server_others.go:176] Using ipvs Proxier.
+
+```bash
+kubectl -n kube-system logs -f <kube-proxy 容器名>
+```
+
+- 查看代理规则
+
+```bash
+ipvsadm -ln
+```
+
+- 查看生效的配置
+
+```bash
+kubectl -n kube-system get cm kubeadm-config -oyaml
+```
+
+- 查看 etcd 集群
+
+```bash
+kubectl -n kube-system exec etcd-kubernetes-master-01 -- etcdctl \
+	--endpoints=https://192.168.141.150:2379 \
+	--ca-file=/etc/kubernetes/pki/etcd/ca.crt \
+	--cert-file=/etc/kubernetes/pki/etcd/server.crt \
+	--key-file=/etc/kubernetes/pki/etcd/server.key cluster-health
+
+# 输出如下
+member 1dfaf07371bb0cb6 is healthy: got healthy result from https://192.168.141.152:2379
+member 2da85730b52fbeb2 is healthy: got healthy result from https://192.168.141.150:2379
+member 6a3153eb4faaaffa is healthy: got healthy result from https://192.168.141.151:2379
+cluster is healthy
+```
+
+##### 验证高可用
+
+> 特别注意：Keepalived 要求至少 2 个备用节点，故想测试高可用至少需要 1 主 2 从模式验证，否则可能出现意想不到的问题
+
+对任意一台 Master 机器执行关机操作
+
+```bash
+shutdown -h now
+```
+
+在任意一台 Master 节点上查看 Node 状态
+
+```bash
+kubectl get node
+
+# 输出如下，除已关机那台状态为 NotReady 其余正常便表示成功
+NAME                   STATUS   ROLES    AGE   VERSION
+kubernetes-master-01   NotReady master   18m   v1.14.2
+kubernetes-master-02   Ready    master   17m   v1.14.2
+kubernetes-master-03   Ready    master   16m   v1.14.2
+```
+
+查看 VIP 漂移
+
+```bash
+ip a |grep ens33
+
+# 输出如下
+2: ens33: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UP group default qlen 1000
+    inet 192.168.141.151/24 brd 192.168.141.255 scope global ens33
+    inet 192.168.141.200/24 scope global secondary ens33
+```
