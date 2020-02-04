@@ -3569,3 +3569,4 @@ ip a |grep ens33
     inet 192.168.141.151/24 brd 192.168.141.255 scope global ens33
     inet 192.168.141.200/24 scope global secondary ens33
 ```
+
