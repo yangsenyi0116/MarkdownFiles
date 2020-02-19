@@ -304,3 +304,58 @@ InputStream is = response.getEntity().getContent();
 Files.copy(is, new File("temp.png").toPath(), StandardCopyOption.REPLACE_EXISTING);
 ```
 
+### 没有设置字符编码的话，response默认编码为ISO-8859-1。
+
+```java
+String res = new String(doGet(url).getbytes("ISO-8859-1"), "UTF-8");
+```
+
+### 例子
+
+```java
+import org.apache.http.HttpResponse;
+import org.apache.http.NameValuePair;
+import org.apache.http.client.HttpClient;
+import org.apache.http.client.entity.UrlEncodedFormEntity;
+import org.apache.http.client.methods.CloseableHttpResponse;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.client.utils.URLEncodedUtils;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClients;
+import org.apache.http.message.BasicNameValuePair;
+import org.apache.http.util.EntityUtils;
+
+import java.io.IOException;
+import java.io.UnsupportedEncodingException;
+import java.util.*;
+
+public class HTTPClientTest {
+    public static String doGet(String url) throws IOException {
+        CloseableHttpClient httpClient = HttpClients.custom().build();
+        CloseableHttpResponse response = httpClient.execute(new HttpGet(url));
+        return EntityUtils.toString(response.getEntity());
+    }
+
+    public static String doPost(String url, Map<String, String> params) throws IOException {
+        HttpClient httpClient = HttpClients.custom().build();
+        HttpPost httpPost = new HttpPost(url);
+        List<NameValuePair> formparams = new ArrayList<>();
+        Set<String> set = params.keySet();
+        Iterator<String> it = set.iterator();
+        while (it.hasNext()) {
+            formparams.add(new BasicNameValuePair(it.next(), params.get(it.next())));
+        }
+        UrlEncodedFormEntity entity = new UrlEncodedFormEntity(formparams, "UTF-8");
+        httpPost.setEntity(entity);
+        HttpResponse response = httpClient.execute(httpPost);
+        return EntityUtils.toString(response.getEntity());
+    }
+
+    public static void main(String[] args) throws IOException {
+        String res = new String(doGet("http://www.baidu.com").getBytes("ISO-8859-1"), "UTF-8");
+        System.out.println(res);
+    }
+}
+```
+
