@@ -1,4 +1,4 @@
-[原文](https://blog.csdn.net/JinXYan/article/details/89302126?depth_1-utm_source=distribute.pc_relevant.none-task-blog-BlogCommendFromBaidu-1)
+[ 原文](https://blog.csdn.net/JinXYan/article/details/89302126?depth_1-utm_source=distribute.pc_relevant.none-task-blog-BlogCommendFromBaidu-1)
 
 ## **什么是AOP**
 
@@ -184,7 +184,8 @@ public @interface EnableAspectJAutoProxy {
 这里核心是@Import(AspectJAutoProxyRegistrar.class);在AspectJAutoProxyRegistrar里,核心的地方是
 
 ```java
-AopConfigUtils.registerAspectJAnnotationAutoProxyCreatorIfNecessary(registry);
+AopConfigUtils.registerAspectJ();
+AnnotationAutoProxyCreatorIfNecessary(registry);
 ```
 
 ​    一个AOP的工具类,这个工具类的主要作用是把AnnotationAwareAspectJAutoProxyCreator这个类定义为BeanDefinition放到spring容器中,这是通过实现ImportBeanDefinitionRegistrar接口来装载的,具体装载过程不是本篇的重点,这里就不赘述,我们重点看AnnotationAwareAspectJAutoProxyCreator这个类.
@@ -200,7 +201,7 @@ AopConfigUtils.registerAspectJAnnotationAutoProxyCreatorIfNecessary(registry);
 这里先看一下最顶部的抽象类:AbstractAutoProxyCreator,这个抽象类主要抽象了实现代理的逻辑:
 
 ```java
-@Override
+	@Override
 	public Object postProcessBeforeInitialization(Object bean, String beanName) {
 		return bean;
 	}
@@ -253,7 +254,7 @@ AopConfigUtils.registerAspectJAnnotationAutoProxyCreatorIfNecessary(registry);
 
 - **1）将AnnotationAwareAspectJAutoProxyCreator注册到Spring容器中**
 - **2）AnnotationAwareAspectJAutoProxyCreator类的postProcessAfterInitialization()方法将所有有advice的bean重新包装成proxy**
-   
+  
 
 ## **创建proxy过程分析**
 
