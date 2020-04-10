@@ -69,3 +69,105 @@ RUN /bin/cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \  && echo 'Asia/Sh
 ```
 
 保存后，利用docker build命令生成镜像使用即可。
+
+---
+
+### 1. 容器与宿主机同步时间
+
+在启动镜像时候把操作系统的时间通过"只读"的方式挂载到容器中
+
+命令行配置
+
+```bash
+-v /etc/localtime:/etc/localtime:ro
+```
+
+> 如：
+> `docker -it -v /etc/localtime:/etc/localtime:ro centos bash`
+
+docker compose配置方式
+
+```
+volumes:
+  -  /etc/localtime:/etc/localtime:ro
+```
+
+### 2. Spring boot Jar 启动时增加时区参数
+
+在制作镜像时候，运行jar时指定上时区参数，以便Springboot项目中的日志中能够正确读取到指定时区的时间。中国采用东八区的时区，所以是`GMT+8`
+
+```bash
+-Duser.timezone=GMT+8
+```
+
+> 如：
+> `java -jar -Duser.timezone=GMT+8 your_application.jar`
+
+对应的Dockerfile应该为
+
+```Dockfile
+ENTRYPOINT ["java", "-jar", "-Duser.timezone=GMT+8", "/app.jar"]
+```
+
+实验以及解决过程
+Spring boot的jar名称为test-dock-datetime-0.0.1-SNAPSHOT.jar
+
+Dockerfile如下
+```
+FROM openjdk:8-jre
+MAINTAINER hznu@cliven
+VOLUME /tmp
+COPY test-dock-datetime-0.0.1-SNAPSHOT.jar /app.jar
+
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "/app.jar"]
+```
+
+
+容器运行命令
+
+```
+ docker run -it -p 8080:8080 test-dock-datetime:0.0.1-SNAPSHOT
+```
+
+
+
+发现日志时间都不正确
+
+linux 上的时间为`Sun Mar 3 15:15:53 CST 2019`
+
+通过`exec`到容器中确认时间，`Sun Mar 3 07:17:20 UTC 2019`，偏差极大
+
+> docker exec -it container_id bash
+
+
+
+首先解决容器中的时间与宿主机的时间不一致的问题，
+命令行配置
+
+```bash
+docker run -it -p 8080:8080 -v /etc/localtime:/etc/localtime:ro test-dock-datetime:0.0.1-SNAPSHOT
+```
+
+再次运行可以看到容器中的时间和宿主机的时间已经保持一致。
+
+接下来我们在观察一下Spring boot 的启动日志
+![启动日志](assets/20190303154032608.png)
+
+发现时间仍然不对，导致这个的原因是没有为该应用设置时区，所以采用了0区的时间，那么我们需要在jar的启动命令上加上时区参数。
+
+修改Dockerfile，加入-Duser.timezone=GMT+8启动参数，表示东8的时区。
+
+```
+FROM openjdk:8-jre
+MAINTAINER hznu@cliven
+VOLUME /tmp
+COPY test-dock-datetime-0.0.1-SNAPSHOT.jar /app.jar
+
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "-Duser.timezone=GMT+8","/app.jar"]
+```
+
+修改Dockerfile 后需要重新打包镜像，重新打包镜像，运行后可以看到Springboot 的启动的日志中的时间都已经是正确的时间。
+
+![正确时间](assets/20190303160140600.png)

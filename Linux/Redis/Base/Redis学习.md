@@ -1,8 +1,6 @@
 Redis数据类型
 
-![1562763522380](G:\onedriver\OneDrive\MarkDown\image\1562763522380.png)
 
-![1562763584676](G:\onedriver\OneDrive\MarkDown\image\1562763584676.png)
 
 ```cmd
 set {key} {value}
@@ -11,7 +9,7 @@ incr {key}自增
 decr {key} {decrement}自减
 ```
 
-![1562763809521](G:\onedriver\OneDrive\MarkDown\image\1562763809521.png)
+
 
 ```cmd
 lpush {list} {value} 左添加
@@ -22,7 +20,7 @@ llen {list} 长度
 
 ```
 
-![1562763974536](G:\onedriver\OneDrive\MarkDown\image\1562763974536.png)
+
 
 >set集合是string类型的无序集合，set是通过hashtable实现的，对集合我们可以取交集，并集，差集
 >
@@ -45,7 +43,7 @@ sismember {list} {value} 判断value是否存在在list中
 srem {list} {value} 从list中删除value
 ```
 
-![1562764157001](G:\onedriver\OneDrive\MarkDown\image\1562764157001.png)
+
 
 ```cmd
 hset {hash} {key} {value} 往hash中插入key value
@@ -55,7 +53,7 @@ hlen {hash} 判断hash中有多少个元素
 hmget {hash} {key1} {key2}取得hash中的key的值（多个）
 ```
 
-![1562764425281](G:\onedriver\OneDrive\MarkDown\image\1562764425281.png)
+
 
 ```cmd
 zadd {sort set} {value} {key}
