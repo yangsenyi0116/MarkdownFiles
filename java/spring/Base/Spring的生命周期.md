@@ -1,0 +1,34 @@
+![img](assets/181453414212066.png)
+
+![img](assets/181454040628981.png)
+
+1. 实例化BeanFactoryPostProcessor实现类
+2. 执行BeanFactoryPostProcessor的postProcessBeanFactory方法
+3. 实例化BeanPostProcessor实现类
+4. 实例化InstantiationAwareBeanPostProcessorAdapter实现类
+5. 执行InstantiationAwareBeanPostProcessor的postProcessBeforeInstantiation方法
+6. 执行Bean的构造器
+7. 执行InstantiationAwareBeanPostProcessor的postProcessPropertyValues方法
+8. 为Bean注入属性
+9. 执行BeanNameAware的setBeanName方法
+10. 调用BeanFactoryAware的setBeanFactory方法
+11. 执行BeanPostProcessor的postProcessBeforeInitializtion方法
+12. 调用InitializingBean的afterPropertiesSet方法
+13. 调用<bean>的init-method属性指定的初始化方法
+14. 执行BeanPostProcessor的postProcessAfterInitialization方法
+15. 执行InstantiationAwareBeanPostProcessor的postProcessAfterInitialization方法
+16. 容器初始化成功，正常调用后，销毁容器
+17. 调用DiposibleBean的destory方法
+18. 调用<bean>的destory-method属性指定的初始化方法
+
+
+
+上边划分一下
+
+Bean的完整生命周期经历了一下几种方法调用
+
+1. Bean自身的方法： Bean本身调用的方法和通过配置文件中<bean>的init-method和destory-method指定的方法
+2. Bean级生命周期接口方法：这个包括了BeanNameAware、BeanFactoryAware、InitializingBean和DiposableBean这些接口方法
+3. 容器及生命周期接口方法：这个包括了InstantiationAwareBeanPostProcessor和BeanPostProcessor这两个接口实现，一般称他们为后置处理器
+4. 工厂后处理器接口方法： 这个包括了AspectJWeavingEnabler，ConfigurationClassPostProcessor，CustomAutowireConfigurer等等非常有用的工厂后处理器接口的方法。工厂后处理器也是容器级的。在应用上下文装配配置文件之后立即调用
+
