@@ -439,7 +439,7 @@ public class NacosConsumerApplication {
 
 ```
 
-#### NacosConsumerConfiguration.class
+#### NacosConsumerConfiguration.java
 
 **创建一个名为 NacosConsumerConfiguration 的 Java配置类，主要作用是为了注入 RestTemplate**
 
